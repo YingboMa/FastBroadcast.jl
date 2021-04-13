@@ -25,11 +25,17 @@ getArgs(::Type{Broadcasted{S,Axes,F,Args}}) where {S,Axes,F,Args} = collect(Args
     quote
         $(bcc.loopheader)
         if $islinear($axes(dst), $(bcc.arrays...))
-            @inbounds @simd for i in $eachindex(dst)
-                $loopbody_lin
+            if $safeivdep(dst, $(bcc.arrays...))
+                @inbounds @simd ivdep for i in $eachindex(dst)
+                    $loopbody_lin
+                end
+            else
+                @inbounds @simd for i in $eachindex(dst)
+                    $loopbody_lin
+                end
             end
         else
-            Base.Cartesian.@nloops $(ndims(dst)) i dst begin
+            @inbounds Base.Cartesian.@nloops $(ndims(dst)) i dst begin
                 $loopbody_car
             end
         end
@@ -39,6 +45,10 @@ end
 
 @inline islinear(dst, src) = dst == axes(src)
 @inline islinear(dst, src, srcs::Vararg{AbstractArray,K}) where {K} = dst == axes(src) && islinear(dst, srcs...)
+
+@inline safeivdep(::Array{T}) where {T<:Union{Bool,Base.HWReal}} = true
+@inline safeivdep(::Array{T}, arg1, args::Vararg{Array,K}) where {K,T<:Union{Bool,Base.HWReal}} = safeivdep(arg1, args...)
+@inline safeivdep(args::Vararg{Any,K}) where {K} = false
 
 mutable struct BroadcastCharacteristics
     maybelinear::Bool
