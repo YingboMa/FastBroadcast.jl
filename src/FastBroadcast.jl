@@ -105,16 +105,16 @@ function broadcasted_expr!(_ex)
   for n ∈ 2:length(ex.args)
     push!(t.args, broadcasted_expr!(ex.args[n]))
   end
-  Expr(:call, GlobalRef(Broadcast, :Broadcasted), ex.args[1], t)
+  Expr(:call, Broadcast.Broadcasted, ex.args[1], t)
 end
 function broadcast_expr!(ex::Expr)
   if Meta.isexpr(ex, :(=), 2)
-    return Expr(:call, GlobalRef(FastBroadcast, :fast_materialize!), ex.args[1], broadcasted_expr!(ex.args[2]))
+    return Expr(:call, fast_materialize!, ex.args[1], broadcasted_expr!(ex.args[2]))
   else
-    return Expr(:call, GlobalRef(FastBroadcast, :fast_materialize), broadcasted_expr!(ex))
+    return Expr(:call, fast_materialize, broadcasted_expr!(ex))
   end
 end
-macro var".."(ex)
+macro (..)(ex)
   esc(broadcast_expr!(ex))
 end
 
