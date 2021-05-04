@@ -108,6 +108,11 @@ function broadcasted_expr!(_ex)
   Expr(:call, Broadcast.Broadcasted, ex.args[1], t)
 end
 function broadcast_expr!(ex::Expr)
+  update = findfirst(isequal(ex.head), (:(+=), :(-=), :(*=), :(/=), :(\=), :(^=)))
+  if update ≢ nothing
+    lhs = Expr(:call, (:(+), :(-), :(*), :(/), :(\), :(^))[update], ex.args[1], ex.args[2])
+    ex = Expr(:(=), ex.args[1], lhs)
+  end
   if Meta.isexpr(ex, :(=), 2)
     return Expr(:call, fast_materialize!, ex.args[1], broadcasted_expr!(ex.args[2]))
   else

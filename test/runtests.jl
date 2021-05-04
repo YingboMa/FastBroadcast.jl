@@ -10,4 +10,7 @@ using Test
     dest = similar(bcref);
     @test (@.. dest = (x*y) + x + y + x + y + x + y) == bcref
     @test (@.. (x*y) + x + y + x + y + x + y) == bcref
+    @test (@.. dest += (x*y) + x + y + x + y + x + y) ≈ 2bcref
+    @test (@.. dest -= (x*y) + x + y + x + y + x + y) ≈ bcref
+    @test (@.. dest *= (x*y) + x + y + x + y + x + y) ≈ abs2.(bcref)
 end
