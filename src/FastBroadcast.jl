@@ -1,6 +1,6 @@
 module FastBroadcast
 
-export fast_materialize!
+export fast_materialize!, @..
 
 using Base.Broadcast: Broadcasted
 
@@ -23,6 +23,7 @@ getArgs(::Type{Broadcasted{S,Axes,F,Args}}) where {S,Axes,F,Args} = collect(Args
     append!(loopbody_car.args, ii)
 
     quote
+        $(Expr(:meta,:inline))
         $(bcc.loopheader)
         if $islinear($axes(dst), $(bcc.arrays...))
             if $safeivdep(dst, $(bcc.arrays...))
@@ -42,6 +43,7 @@ getArgs(::Type{Broadcasted{S,Axes,F,Args}}) where {S,Axes,F,Args} = collect(Args
         dst
     end
 end
+@inline fast_materialize(bc::Broadcasted) = fast_materialize!(similar(bc, Base.Broadcast.combine_eltypes(bc.f, bc.args)), bc)
 
 @inline islinear(dst, src) = dst == axes(src)
 @inline islinear(dst, src, srcs::Vararg{AbstractArray,K}) where {K} = dst == axes(src) && islinear(dst, srcs...)
@@ -94,6 +96,26 @@ function walk_bc!(
         end
     end
     return nothing
+end
+
+function broadcasted_expr!(_ex)
+  Meta.isexpr(_ex,:call) || return _ex
+  ex::Expr = _ex
+  t = Expr(:tuple)
+  for n ∈ 2:length(ex.args)
+    push!(t.args, broadcasted_expr!(ex.args[n]))
+  end
+  Expr(:call, GlobalRef(Broadcast, :Broadcasted), ex.args[1], t)
+end
+function broadcast_expr!(ex::Expr)
+  if Meta.isexpr(ex, :(=), 2)
+    return Expr(:call, GlobalRef(FastBroadcast, :fast_materialize!), ex.args[1], broadcasted_expr!(ex.args[2]))
+  else
+    return Expr(:call, GlobalRef(FastBroadcast, :fast_materialize), broadcasted_expr!(ex))
+  end
+end
+macro var".."(ex)
+  esc(broadcast_expr!(ex))
 end
 
 end
