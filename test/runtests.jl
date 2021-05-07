@@ -13,4 +13,7 @@ using Test
     @test (@.. dest += (x*y) + x + y + x + y + x + y) ≈ 2bcref
     @test (@.. dest -= (x*y) + x + y + x + y + x + y) ≈ bcref
     @test (@.. dest *= (x*y) + x + y + x + y + x + y) ≈ abs2.(bcref)
+    @test (@.. (x*y) + x + y + x*(3,4,5,6) + y + x * (1,) + y + 3) ≈ (@. (x*y) + x + y + x*(3,4,5,6) + y + x * (1,) + y + 3)
+    A = rand(4,4);
+    @test (@.. A * y' + x) ≈ (@. A * y' + x)
 end
