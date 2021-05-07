@@ -43,7 +43,7 @@ getAxes(::Type{T}) where {T<:Tuple} = collect(T.parameters)
         isfast = true
         (Base.Cartesian.@ntuple $N dstaxis) = dstaxes
         $(bcc.loopheader)
-        if isfast#$isfast($axes(dst), $(bcc.arrays...))
+        if isfast
             $loop_quote
         else
             slow_materialize!(dst, bc)
@@ -77,15 +77,6 @@ end
 @inline fast_materialize(bc::Broadcasted) = fast_materialize!(similar(bc, Base.Broadcast.combine_eltypes(bc.f, bc.args)), bc)
 fast_materialize!(dest, x::Number) = fill!(dest, x)
 fast_materialize!(dest, x::AbstractArray) = copyto!(dest, x)
-
-@inline _check_isfast(dst::Tuple, src::Tuple{}) = true
-@inline _check_isfast(dst::Tuple, src::Tuple{T}) where {T} = first(dst) == first(src)
-@inline _check_isfast(dst::Tuple, src::Tuple{T,Vararg{Any,K}}) where {T,K} = (first(dst) == first(src)) & _check_isfast(Base.tail(dst), Base.tail(src))
-@inline check_isfast(dst, src::Adjoint{<:Any,<:AbstractVector}) = dst[2] == axes(parent(src), 1)
-@inline check_isfast(dst, src::Transpose{<:Any,<:AbstractVector}) = dst[2] == axes(parent(src), 1)
-@inline check_isfast(dst, src) = _check_isfast(dst, axes(src))
-@inline isfast(dst, src) = check_isfast(dst, src)
-@inline isfast(dst, src, srcs::Vararg{AbstractArray,K}) where {K} = check_isfast(dst, src) & isfast(dst, srcs...)
 
 safeivdep(_) = false
 safeivdep(::Type{Array{T,N}}) where {T <: Union{Bool,Base.HWNumber},N} = true
