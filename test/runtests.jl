@@ -16,4 +16,14 @@ using Test
     @test (@.. (x*y) + x + y + x*(3,4,5,6) + y + x * (1,) + y + 3) ≈ (@. (x*y) + x + y + x*(3,4,5,6) + y + x * (1,) + y + 3)
     A = rand(4,4);
     @test (@.. A * y' + x) ≈ (@. A * y' + x)
+    @test (@.. A * transpose(y) + x) ≈ (@. A * transpose(y) + x)
+    Ashim = A[1:1,:];
+    @test (@.. Ashim * y' + x) ≈ (@. Ashim * y' + x) # test fallback
+    Av = view(A,1,:);
+    @test (@.. Av * y' + A) ≈ (@. Av * y' + A)
+    B = similar(A);
+    @.. B = A
+    @test B == A
+    @.. A = 3
+    @test all(==(3), A)
 end
