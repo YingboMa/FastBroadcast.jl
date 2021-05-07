@@ -1,7 +1,10 @@
 name = "FastBroadcast"
 uuid = "7034ab61-46d4-4ed7-9d0f-46aef9175898"
 authors = ["Yingbo Ma <mayingbo5@gmail.com> and contributors"]
-version = "0.1.0"
+version = "0.1.1"
+
+[deps]
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 
 [compat]
 julia = "1"
