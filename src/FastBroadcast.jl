@@ -188,8 +188,14 @@ function walk_bc!(
     return nothing
 end
 
+# From Julia Base
+dottable(x) = false # avoid dotting spliced objects (e.g. view calls inserted by @view)
+# don't add dots to dot operators
+dottable(x::Symbol) = (!Base.isoperator(x) || first(string(x)) != '.' || x === :..) && x !== :(:)
+dottable(x::Expr) = x.head !== :$
+
 function broadcasted_expr!(_ex)
-    Meta.isexpr(_ex,:call) || return _ex
+    (Meta.isexpr(_ex,:call) && dottable(_ex.args[1])) || return _ex
     ex::Expr = _ex
     call = Expr(:call, Base.Broadcast.broadcasted, ex.args[1])
     for n ∈ 2:length(ex.args)
@@ -197,6 +203,7 @@ function broadcasted_expr!(_ex)
     end
     call
 end
+
 function broadcast_expr!(ex::Expr)
     update = findfirst(isequal(ex.head), (:(+=), :(-=), :(*=), :(/=), :(\=), :(^=), :(&=), :(|=), :(⊻=), :(÷=)))
     if update ≢ nothing
@@ -209,6 +216,7 @@ function broadcast_expr!(ex::Expr)
         return Expr(:call, fast_materialize, broadcasted_expr!(ex))
     end
 end
+
 macro (..)(ex)
     esc(broadcast_expr!(ex))
 end
