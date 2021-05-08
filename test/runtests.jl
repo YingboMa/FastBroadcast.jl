@@ -1,6 +1,6 @@
 using FastBroadcast
 using SparseArrays
-using Test
+using PerformanceTestTools, Test
 
 @testset "FastBroadcast" begin
     x, y = [1,2,3,4], [5,6,7,8]
@@ -40,3 +40,5 @@ using Test
     @test res isa SparseVector
     @test res == [3, 4, 0, 12]
 end
+
+VERSION >= v"1.6" && PerformanceTestTools.@include("vectorization_tests.jl")
