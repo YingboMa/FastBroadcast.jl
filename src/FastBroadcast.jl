@@ -13,7 +13,7 @@ getAxes(::Type{T}) where {T<:Tuple} = collect(T.parameters)
 
 use_fast_broadcast(_) = false
 use_fast_broadcast(::Type{<:Base.Broadcast.DefaultArrayStyle}) = true
-use_fast_broadcast(::Type{Base.Broadcast.DefaultArrayStyle{0}}) = false
+use_fast_broadcast(::Type{<:Base.Broadcast.DefaultArrayStyle{0}}) = false
 
 @inline function fast_materialize(bc::Broadcasted{S}) where S
     if use_fast_broadcast(S)
@@ -191,7 +191,7 @@ end
 function broadcasted_expr!(_ex)
     Meta.isexpr(_ex,:call) || return _ex
     ex::Expr = _ex
-    call = Expr(:call, Base.broadcasted, ex.args[1])
+    call = Expr(:call, Base.Broadcast.broadcasted, ex.args[1])
     for n ∈ 2:length(ex.args)
         push!(call.args, broadcasted_expr!(ex.args[n]))
     end
