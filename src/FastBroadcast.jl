@@ -189,7 +189,7 @@ function walk_bc!(
 end
 
 # From Julia Base
-dottable(x) = false # avoid dotting spliced objects (e.g. view calls inserted by @view)
+dottable(x) = x !== Base.maybeview
 # don't add dots to dot operators
 dottable(x::Symbol) = x !== :(:)
 
