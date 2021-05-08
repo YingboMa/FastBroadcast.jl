@@ -204,7 +204,7 @@ function undotop(ex)
 end
 
 function broadcasted_expr!(_ex)
-    if Meta.isexpr(_ex, :.)
+    if Meta.isexpr(_ex, :.) && Meta.isexpr(_ex.args[2], :tuple)
         _ex = Expr(:call, _ex.args[1], _ex.args[2].args...)
     end
     _ex = undotop(_ex)
