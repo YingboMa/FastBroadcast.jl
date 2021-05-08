@@ -1,6 +1,6 @@
 module FastBroadcast
 
-export fast_materialize!, @..
+export @..
 
 using Base.Broadcast: Broadcasted
 using LinearAlgebra: Adjoint, Transpose
@@ -11,7 +11,26 @@ getF(::Type{Broadcasted{S,Axes,F,Args}}) where {S,Axes,F,Args} = F
 getArgs(::Type{Broadcasted{S,Axes,F,Args}}) where {S,Axes,F,Args} = collect(Args.parameters)
 getAxes(::Type{T}) where {T<:Tuple} = collect(T.parameters)
 
-@inline fast_materialize!(dst, bc::Broadcasted) = fast_materialize!(dst, bc, axes(dst), _get_axes(bc), _index_style(bc))
+use_fast_broadcast(_) = false
+use_fast_broadcast(::Type{<:Base.Broadcast.DefaultArrayStyle}) = true
+use_fast_broadcast(::Type{Base.Broadcast.DefaultArrayStyle{0}}) = false
+
+@inline function fast_materialize(bc::Broadcasted{S}) where S
+    if use_fast_broadcast(S)
+        fast_materialize!(similar(bc, Base.Broadcast.combine_eltypes(bc.f, bc.args)), bc)
+    else
+        Base.Broadcast.materialize(bc)
+    end
+end
+
+@inline function fast_materialize!(dst, bc::Broadcasted{S}) where S
+    if use_fast_broadcast(S)
+        fast_materialize!(dst, bc, axes(dst), _get_axes(bc), _index_style(bc))
+    else
+        Base.Broadcast.materialize!(dst, bc)
+    end
+end
+
 @generated function fast_materialize!(dst, bc::Broadcasted, dstaxes::Tuple{Vararg{Any,N}}, ax, indexstyle) where {N}
     loopbody_lin = :($setindex!(dst))
     loopbody_car = :($setindex!(dst))
@@ -73,22 +92,6 @@ end
 
 
 @noinline slow_materialize!(dest, bc) = Base.Broadcast.materialize!(dest, bc)
-
-@inline _zero_dimensional(args::Tuple{}) = Val(true)
-@inline _zero_dimensional(args::Tuple{T,Vararg}) where {T<:AbstractRange} = Val(false)
-@inline _zero_dimensional(args::Tuple{T,Vararg}) where {T<:Tuple} = _zero_dimensional(_zero_dimensional(first(args)), Base.tail(args))
-@inline _zero_dimensional(::Val{true}, args) = _zero_dimensional(args)
-@inline _zero_dimensional(::Val{false}, args) = Val(false)
-
-@inline function fast_materialize(bc::Broadcasted, bcaxes, ::Val{false})
-  fast_materialize!(similar(bc, Base.Broadcast.combine_eltypes(bc.f, bc.args)), bc)
-end
-@inline fast_materialize(bc::Broadcasted, bcaxes, ::Val{true}) = copy(bc)
-
-@inline function fast_materialize(bc::Broadcasted)
-  bcaxes = _get_axes(bc)
-  fast_materialize(bc, bcaxes, _zero_dimensional(bcaxes))
-end
 
 fast_materialize!(dest, x::Number) = fill!(dest, x)
 fast_materialize!(dest, x::AbstractArray) = copyto!(dest, x)

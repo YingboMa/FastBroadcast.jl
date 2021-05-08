@@ -1,7 +1,8 @@
 using FastBroadcast
+using SparseArrays
 using Test
 
-@testset "FastBroadcast.jl" begin
+@testset "FastBroadcast" begin
     x, y = [1,2,3,4], [5,6,7,8]
     dst = zeros(Int, 4)
     bc = Broadcast.Broadcasted(+, (Broadcast.Broadcasted(*, (x, y)), x, y, x, y, x, y))
@@ -29,4 +30,15 @@ using Test
     @test (@.. 2 + 3 * 7 - cos(π)) === 24.0
     foo(f,x) = f(x)
     @test (@.. foo(abs2,x)) == abs2.(x)
+    x = sparse([1, 2, 0, 4])
+    y = sparse([1, 0, 0, 4])
+    res = @.. x + y
+    @test res isa SparseVector
+    @test res == (@. x + y)
+    res = @.. y = x + y
+    @test res isa SparseVector
+    @test res == [2, 2, 0, 8]
+    res = @.. x = x + y
+    @test res isa SparseVector
+    @test res == [3, 4, 0, 12]
 end
