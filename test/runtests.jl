@@ -26,4 +26,7 @@ using Test
     @test B == A
     @.. A = 3
     @test all(==(3), A)
+    @test (@.. 2 + 3 * 7 - cos(π)) === 24.0
+    foo(f,x) = f(x)
+    @test (@.. foo(abs2,x)) == abs2.(x)
 end

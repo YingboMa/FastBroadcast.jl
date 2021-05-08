@@ -74,7 +74,22 @@ end
 
 @noinline slow_materialize!(dest, bc) = Base.Broadcast.materialize!(dest, bc)
 
-@inline fast_materialize(bc::Broadcasted) = fast_materialize!(similar(bc, Base.Broadcast.combine_eltypes(bc.f, bc.args)), bc)
+@inline _zero_dimensional(args::Tuple{}) = Val(true)
+@inline _zero_dimensional(args::Tuple{T,Vararg}) where {T<:AbstractRange} = Val(false)
+@inline _zero_dimensional(args::Tuple{T,Vararg}) where {T<:Tuple} = _zero_dimensional(_zero_dimensional(first(args)), Base.tail(args))
+@inline _zero_dimensional(::Val{true}, args) = _zero_dimensional(args)
+@inline _zero_dimensional(::Val{false}, args) = Val(false)
+
+@inline function fast_materialize(bc::Broadcasted, bcaxes, ::Val{false})
+  fast_materialize!(similar(bc, Base.Broadcast.combine_eltypes(bc.f, bc.args)), bc)
+end
+@inline fast_materialize(bc::Broadcasted, bcaxes, ::Val{true}) = copy(bc)
+
+@inline function fast_materialize(bc::Broadcasted)
+  bcaxes = _get_axes(bc)
+  fast_materialize(bc, bcaxes, _zero_dimensional(bcaxes))
+end
+
 fast_materialize!(dest, x::Number) = fill!(dest, x)
 fast_materialize!(dest, x::AbstractArray) = copyto!(dest, x)
 
@@ -173,11 +188,11 @@ end
 function broadcasted_expr!(_ex)
     Meta.isexpr(_ex,:call) || return _ex
     ex::Expr = _ex
-    t = Expr(:tuple)
+    call = Expr(:call, Base.broadcasted, ex.args[1])
     for n ∈ 2:length(ex.args)
-        push!(t.args, broadcasted_expr!(ex.args[n]))
+        push!(call.args, broadcasted_expr!(ex.args[n]))
     end
-    Expr(:call, Broadcast.Broadcasted, ex.args[1], t)
+    call
 end
 function broadcast_expr!(ex::Expr)
     update = findfirst(isequal(ex.head), (:(+=), :(-=), :(*=), :(/=), :(\=), :(^=), :(&=), :(|=), :(⊻=), :(÷=)))
