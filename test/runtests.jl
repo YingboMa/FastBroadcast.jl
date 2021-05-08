@@ -27,7 +27,9 @@ using PerformanceTestTools, Test
     @test B == A
     @.. A = 3
     @test all(==(3), A)
-
+    @test (@.. 2 + 3 * 7 - cos(π)) === 24.0
+    foo(f,x) = f(x)
+    @test (@.. foo(abs2,x)) == abs2.(x)
     x = sparse([1, 2, 0, 4])
     y = sparse([1, 0, 0, 4])
     res = @.. x + y
@@ -39,6 +41,15 @@ using PerformanceTestTools, Test
     res = @.. x = x + y
     @test res isa SparseVector
     @test res == [3, 4, 0, 12]
+
+    @static if VERSION >= v"1.6"
+        a = [1, 2]
+        b = [3, 5]
+        c = 1
+        var".foo"(a) = a
+        @views @.. a = var".foo".(b[1:2]) .+ $abs2(c)
+        @test a == [4, 6]
+    end
 end
 
 VERSION >= v"1.6" && PerformanceTestTools.@include("vectorization_tests.jl")
