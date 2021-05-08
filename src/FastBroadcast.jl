@@ -191,11 +191,26 @@ end
 # From Julia Base
 dottable(x) = false # avoid dotting spliced objects (e.g. view calls inserted by @view)
 # don't add dots to dot operators
-dottable(x::Symbol) = (!Base.isoperator(x) || first(string(x)) != '.' || x === :..) && x !== :(:)
-dottable(x::Expr) = x.head !== :$
+dottable(x::Symbol) = x !== :(:)
+
+function undotop(ex)
+    Meta.isexpr(ex, :call) || return ex
+    str = string(ex.args[1])
+    if first(str) == '.' && (op = Symbol(str[2:end]); Base.isoperator(op))
+        return Expr(:call, op, ex.args[2:end]...)
+    else
+        return ex
+    end
+end
 
 function broadcasted_expr!(_ex)
-    (Meta.isexpr(_ex,:call) && dottable(_ex.args[1])) || return _ex
+    if Meta.isexpr(_ex, :.)
+        _ex = Expr(:call, _ex.args[1], _ex.args[2].args...)
+    end
+    _ex = undotop(_ex)
+    Meta.isexpr(_ex, :call) || return _ex
+    Meta.isexpr(_ex.args[1], :$) && return Expr(:call, _ex.args[1].args[1], _ex.args[2:end]...)
+    dottable(_ex.args[1]) || return _ex
     ex::Expr = _ex
     call = Expr(:call, Base.Broadcast.broadcasted, ex.args[1])
     for n ∈ 2:length(ex.args)

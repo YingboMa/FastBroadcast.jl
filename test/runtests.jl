@@ -41,4 +41,13 @@ using Test
     res = @.. x = x + y
     @test res isa SparseVector
     @test res == [3, 4, 0, 12]
+
+    @static if VERSION >= v"1.6"
+        a = [1, 2]
+        b = [3, 5]
+        c = 1
+        var".foo"(a) = a
+        @views @.. a = var".foo".(b[1:2]) .+ $abs2(c)
+        @test a == [4, 6]
+    end
 end
