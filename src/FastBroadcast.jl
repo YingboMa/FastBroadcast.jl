@@ -234,7 +234,7 @@ function broadcast_expr!(ex::Expr)
 end
 
 macro (..)(ex)
-    esc(broadcast_expr!(ex))
+    esc(broadcast_expr!(macroexpand(__module__, ex)))
 end
 
 end
