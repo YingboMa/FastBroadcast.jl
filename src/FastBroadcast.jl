@@ -220,7 +220,8 @@ function broadcasted_expr!(_ex)
     call
 end
 
-function broadcast_expr!(ex::Expr)
+function broadcast_expr!(ex)
+    ex isa Expr || return ex
     update = findfirst(isequal(ex.head), (:(+=), :(-=), :(*=), :(/=), :(\=), :(^=), :(&=), :(|=), :(⊻=), :(÷=)))
     if update ≢ nothing
         lhs = Expr(:call, (:(+), :(-), :(*), :(/), :(\), :(^), :(&), :(|), :(⊻), :(÷))[update], ex.args[1], ex.args[2])
@@ -234,7 +235,7 @@ function broadcast_expr!(ex::Expr)
 end
 
 macro (..)(ex)
-    esc(broadcast_expr!(ex))
+    esc(broadcast_expr!(macroexpand(__module__, ex)))
 end
 
 end

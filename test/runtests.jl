@@ -52,10 +52,13 @@ if GROUP == "All" || GROUP == "Core"
         @test res isa SparseVector
         @test res == [3, 4, 0, 12]
 
+        a = [1, 2]
+        b = [3, 5]
+        c = 1
+        res = @.. @views a = c * b[1:2]
+        @test res == (@. @views a = c * b[1:2])
+        @test a === (@.. a)
         @static if VERSION >= v"1.6"
-            a = [1, 2]
-            b = [3, 5]
-            c = 1
             var".foo"(a) = a
             @views @.. a = var".foo".(b[1:2]) .+ $abs2(c)
             @views @.. a = var".foo".(b[1:2]) .+ $(abs2(c))
