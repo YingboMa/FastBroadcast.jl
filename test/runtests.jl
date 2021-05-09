@@ -49,6 +49,7 @@ using PerformanceTestTools, Test
         c = 1
         var".foo"(a) = a
         @views @.. a = var".foo".(b[1:2]) .+ $abs2(c)
+        @views @.. a = var".foo".(b[1:2]) .+ $(abs2(c))
         @test a == [4, 6]
     end
 end
