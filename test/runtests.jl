@@ -57,6 +57,7 @@ if GROUP == "All" || GROUP == "Core"
         c = 1
         res = @.. @views a = c * b[1:2]
         @test res == (@. @views a = c * b[1:2])
+        @test a === (@.. a)
         @static if VERSION >= v"1.6"
             var".foo"(a) = a
             @views @.. a = var".foo".(b[1:2]) .+ $abs2(c)

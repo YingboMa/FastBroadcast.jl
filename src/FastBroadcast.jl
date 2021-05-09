@@ -220,7 +220,8 @@ function broadcasted_expr!(_ex)
     call
 end
 
-function broadcast_expr!(ex::Expr)
+function broadcast_expr!(ex)
+    ex isa Expr || return ex
     update = findfirst(isequal(ex.head), (:(+=), :(-=), :(*=), :(/=), :(\=), :(^=), :(&=), :(|=), :(⊻=), :(÷=)))
     if update ≢ nothing
         lhs = Expr(:call, (:(+), :(-), :(*), :(/), :(\), :(^), :(&), :(|), :(⊻), :(÷))[update], ex.args[1], ex.args[2])
