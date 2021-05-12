@@ -222,9 +222,9 @@ end
 
 function broadcast_expr!(ex)
     ex isa Expr || return ex
-    update = findfirst(isequal(ex.head), (:(+=), :(-=), :(*=), :(/=), :(\=), :(^=), :(&=), :(|=), :(⊻=), :(÷=), :(.+=), :(.-=), :(.*=), :(./=), :(.\=), :(.^=), :(.&=), :(.|=), :(.⊻=), :(.÷=)))
+    update = findfirst(Base.Fix1(Base.sym_in, ex.head), ((:(+=),:(.+=)), (:(-=),:(.-=)), (:(*=),:(.*=)), (:(/=),:(./=)), (:(\=),:(.\=)), (:(^=),:(.^=)), (:(&=),:(.&=)), (:(|=),:(.|=)), (:(⊻=),:(.⊻=)), (:(÷=),:(.÷=))))
     if update ≢ nothing
-        lhs = Expr(:call, (:(+), :(-), :(*), :(/), :(\), :(^), :(&), :(|), :(⊻), :(÷))[update % 10], ex.args[1], ex.args[2])
+        lhs = Expr(:call, (:(+), :(-), :(*), :(/), :(\), :(^), :(&), :(|), :(⊻), :(÷))[update], ex.args[1], ex.args[2])
         ex = Expr(:(=), ex.args[1], lhs)
     end
     if Meta.isexpr(ex, :(=), 2) || Meta.isexpr(ex, :(.=), 2)
