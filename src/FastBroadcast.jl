@@ -69,7 +69,6 @@ end
             Base.Cartesian.@nloops $N i dst begin
                 $loopbody_slow
             end
-            # slow_materialize!(dst, bc)
         end
         dst
     end
@@ -100,8 +99,6 @@ end
     Base.Cartesian.@nref $N A n -> ifelse(size(A, n) == 1, firstindex(A, n), i[n])
   end
 end
-
-@noinline slow_materialize!(dest, bc) = Base.Broadcast.materialize!(dest, bc)
 
 fast_materialize!(dest, x::Number) = fill!(dest, x)
 fast_materialize!(dest, x::AbstractArray) = copyto!(dest, x)
