@@ -20,8 +20,8 @@ if GROUP == "All" || GROUP == "Core"
         dest = similar(bcref);
         @test (@.. dest = (x*y) + x + y + x + y + x + y) == bcref
         @test (@.. (x*y) + x + y + x + y + x + y) == bcref
-        @test (@.. dest += (x*y) + x + y + x + y + x + y) ≈ 2bcref
-        @test (@.. dest -= (x*y) + x + y + x + y + x + y) ≈ bcref
+        @test (@.. dest .+= (x*y) + x + y + x + y + x + y) ≈ 2bcref
+        @test (@.. dest .-= (x*y) + x + y + x + y + x + y) ≈ bcref
         @test (@.. dest *= (x*y) + x + y + x + y + x + y) ≈ abs2.(bcref)
         nt = (x = x,)
         @test (@.. (nt.x*y) + x + y + x*(3,4,5,6) + y + x * (1,) + y + 3) ≈ (@. (x*y) + x + y + x*(3,4,5,6) + y + nt.x * (1,) + y + 3)
@@ -33,7 +33,7 @@ if GROUP == "All" || GROUP == "Core"
         Av = view(A,1,:);
         @test (@.. Av * y' + A) ≈ (@. Av * y' + A)
         B = similar(A);
-        @.. B = A
+        @.. B .= A
         @test B == A
         @.. A = 3
         @test all(==(3), A)
