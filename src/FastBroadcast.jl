@@ -34,16 +34,17 @@ end
 @generated function fast_materialize!(dst, bc::Broadcasted, dstaxes::Tuple{Vararg{Any,N}}, ax, indexstyle) where {N}
     loopbody_lin = :($setindex!(dst))
     loopbody_car = :($setindex!(dst))
+    loopbody_slow = :($setindex!(dst))
     bcc = BroadcastCharacteristics()
     ii = map(i->Symbol(:i_, i), 1:N)
 
     walk_bc!(
-        bcc, loopbody_lin, loopbody_car,
+        bcc, loopbody_lin, loopbody_car, loopbody_slow,
         ii, bc, :bc, ax, :ax
        )
     push!(loopbody_lin.args, :i)
     append!(loopbody_car.args, ii)
-
+    append!(loopbody_slow.args, ii)
     loop_quote = if !(bcc.maybelinear && (indexstyle === IndexLinear))
         :(@inbounds Base.Cartesian.@nloops $N i dst begin
             $loopbody_car
@@ -65,7 +66,9 @@ end
         if isfast
             $loop_quote
         else
-            slow_materialize!(dst, bc)
+            Base.Cartesian.@nloops $N i dst begin
+                $loopbody_slow
+            end
         end
         dst
     end
@@ -90,8 +93,12 @@ end
 
 @inline _index_style(bc::Broadcasted) = _index_style(_index_style(first(bc.args)), Base.tail(bc.args))
 
-
-@noinline slow_materialize!(dest, bc) = Base.Broadcast.materialize!(dest, bc)
+@generated function broadcastgetindex(A, i::Vararg{Int,N}) where {N}
+  quote
+    $(Expr(:meta,:inline))
+    Base.Cartesian.@nref $N A n -> ifelse(size(A, n) == 1, firstindex(A, n), i[n])
+  end
+end
 
 fast_materialize!(dest, x::Number) = fill!(dest, x)
 fast_materialize!(dest, x::AbstractArray) = copyto!(dest, x)
@@ -113,23 +120,25 @@ BroadcastCharacteristics() = BroadcastCharacteristics(Expr(:block), Symbol[], tr
 _tuplelen(::Type{T}) where {N,T<:Tuple{Vararg{Any,N}}} = N
 
 function walk_bc!(
-        bcc::BroadcastCharacteristics, loopbody_lin, loopbody_car,
+        bcc::BroadcastCharacteristics, loopbody_lin, loopbody_car, loopbody_slow,
         ii, bc::Type{<:Broadcasted}, bcsym, ax::Type{<:Tuple}, axsym
        )
     f = gensym(:f)
     push!(bcc.loopheader.args, :($f = $bcsym.f))
     new_loopbody_lin = Expr(:call, f)
     new_loopbody_car = Expr(:call, f)
+    new_loopbody_slow = Expr(:call, f)
     args = getArgs(bc)
     axs  = getAxes(ax)
     push!(loopbody_lin.args, new_loopbody_lin)
     push!(loopbody_car.args, new_loopbody_car)
+    push!(loopbody_slow.args, new_loopbody_slow)
     for (i, arg) in enumerate(args)
         if arg <: Broadcasted
             new_bcsym = gensym(:bcsym); new_axsym = gensym(:axsym);
             push!(bcc.loopheader.args, :($new_bcsym = $bcsym.args[$i]))
             push!(bcc.loopheader.args, :($new_axsym = $axsym[$i]))
-            walk_bc!(bcc, new_loopbody_lin, new_loopbody_car, ii, arg, new_bcsym, axs[i], new_axsym)
+            walk_bc!(bcc, new_loopbody_lin, new_loopbody_car, new_loopbody_slow, ii, arg, new_bcsym, axs[i], new_axsym)
         else
             new_arg = gensym(:x)
             push!(bcc.loopheader.args, :($new_arg = $bcsym.args[$i]))
@@ -141,14 +150,18 @@ function walk_bc!(
                 push!(bcc.loopheader.args, :($new_arg_parent = parent($new_arg)))
                 push!(bcc.loopheader.args, :(isfast &= axes($new_arg_parent,1) == dstaxis_2))
                 index = :($new_arg_parent[$(ii[2])])
+                slowindex = :(broadcastgetindex($new_arg_parent, $(ii[2])))
                 if eltype(arg) <: Base.HWReal
                     nothing # `adjoint` and `transpose` are the identity
                 elseif (arg <: Adjoint)
                     index = :(adjoint($index))
+                    slowindex = :(adjoint($slowindex))
                 else
                     index = :(transpose($index))
+                    slowindex = :(transpose($slowindex))
                 end
                 push!(new_loopbody_car.args, index)
+                push!(new_loopbody_slow.args, slowindex)
             elseif arg <: Tuple
                 tuple_length = _tuplelen(arg)
                 if tuple_length == 1
@@ -156,11 +169,13 @@ function walk_bc!(
                   push!(bcc.loopheader.args, :($scalar = $new_arg[1]))
                   push!(new_loopbody_lin.args, scalar)
                   push!(new_loopbody_car.args, scalar)
+                  push!(new_loopbody_slow.args, scalar)
                 else
                   bcc.maybelinear &= nd == 1
                   push!(bcc.loopheader.args, :(isfast &= Base.OneTo($tuple_length) == dstaxis_1))
                   push!(new_loopbody_lin.args, :($new_arg[i]))
                   push!(new_loopbody_car.args, :($new_arg[i1]))
+                  push!(new_loopbody_slow.args, :($new_arg[i1]))
                 end
             else
                 new_nd::Int = _tuplelen(axs[i]) # ndims on `arg` won't work because of possible world age errors.
@@ -169,6 +184,7 @@ function walk_bc!(
                     push!(bcc.loopheader.args, :($scalar = $new_arg[]))
                     push!(new_loopbody_lin.args, scalar)
                     push!(new_loopbody_car.args, scalar)
+                    push!(new_loopbody_slow.args, scalar)
                 else
                     push!(bcc.arrays, new_arg)
                     bcc.maybelinear &= (nd == new_nd)
@@ -181,6 +197,7 @@ function walk_bc!(
                     end
                     push!(new_loopbody_lin.args, :($new_arg[i]))
                     push!(new_loopbody_car.args, :($new_arg[$(ii[1:new_nd]...)]))
+                    push!(new_loopbody_slow.args, :(broadcastgetindex($new_arg, $(ii[1:new_nd]...))))
                 end
             end
         end
