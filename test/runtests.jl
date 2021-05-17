@@ -52,8 +52,9 @@ if GROUP == "All" || GROUP == "Core"
             @views @.. a = var".foo".(b[1:2]) .+ $abs2(c)
             @views @.. a = var".foo".(b[1:2]) .+ $(abs2(c))
             @test a == [4, 6]
+        else
+            a = [4, 6]
         end
-
         @test (@.. x[2:3,1] + a) == [6, 9]
         r = copy(y);
         @test (@.. r[3:4] += x[2:3,1] + a) == [13,17]
