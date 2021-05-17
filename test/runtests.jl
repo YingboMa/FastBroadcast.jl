@@ -40,18 +40,7 @@ if GROUP == "All" || GROUP == "Core"
         @test (@.. 2 + 3 * 7 - cos(π)) === 24.0
         foo(f,x) = f(x)
         @test (@.. foo(abs2,x)) == abs2.(x)
-        x = sparse([1, 2, 0, 4])
-        y = sparse([1, 0, 0, 4])
-        res = @.. x + y
-        @test res isa SparseVector
-        @test res == (@. x + y)
-        res = @.. y = x + y
-        @test res isa SparseVector
-        @test res == [2, 2, 0, 8]
-        res = @.. x = x + y
-        @test res isa SparseVector
-        @test res == [3, 4, 0, 12]
-
+      
         a = [1, 2]
         b = [3, 5]
         c = 1
@@ -63,6 +52,26 @@ if GROUP == "All" || GROUP == "Core"
             @views @.. a = var".foo".(b[1:2]) .+ $abs2(c)
             @views @.. a = var".foo".(b[1:2]) .+ $(abs2(c))
             @test a == [4, 6]
+        end
+
+        @test (@.. x[2:3,1] + a) == [6, 9]
+        r = copy(y);
+        @test (@.. r[3:4] += x[2:3,1] + a) == [13,17]
+        @test (@views @.. r[3:4] += x[2:3,1] + a) == [19,26]
+        @test (@.. @views r[3:4] += x[2:3,1] + a) == [25,35]
+        @test r == [5,6,25,35]
+        @testset "Sparse" begin
+            x = sparse([1, 2, 0, 4])
+            y = sparse([1, 0, 0, 4])
+            res = @.. x + y
+            @test res isa SparseVector
+            @test res == (@. x + y)
+            res = @.. y = x + y
+            @test res isa SparseVector
+            @test res == [2, 2, 0, 8]
+            res = @.. x = x + y
+            @test res isa SparseVector
+            @test res == [3, 4, 0, 12]
         end
     end
 
