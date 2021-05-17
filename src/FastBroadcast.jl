@@ -220,10 +220,21 @@ function undotop(ex)
     end
 end
 
+function todotview(ex)
+    Meta.isexpr(ex, :ref) || return ex
+    q = Expr(:call, Base.Broadcast.dotview)
+    for a ∈ ex.args
+        push!(q.args, a)
+    end
+    q
+end
+
 function broadcasted_expr!(_ex)
     Meta.isexpr(_ex, :$) && return _ex.args[1]
     if Meta.isexpr(_ex, :.) && Meta.isexpr(_ex.args[2], :tuple)
         _ex = Expr(:call, _ex.args[1], _ex.args[2].args...)
+    elseif Meta.isexpr(_ex, :ref)
+        return todotview(_ex)
     end
     _ex = undotop(_ex)
     Meta.isexpr(_ex, :call) || return _ex
@@ -239,13 +250,16 @@ end
 
 function broadcast_expr!(ex)
     ex isa Expr || return ex
+    if ex.head === :let
+        return Expr(:let, ex.args[1], broadcast_expr!(ex.args[2]))
+    end
     update = findfirst(Base.Fix1(Base.sym_in, ex.head), ((:(+=),:(.+=)), (:(-=),:(.-=)), (:(*=),:(.*=)), (:(/=),:(./=)), (:(\=),:(.\=)), (:(^=),:(.^=)), (:(&=),:(.&=)), (:(|=),:(.|=)), (:(⊻=),:(.⊻=)), (:(÷=),:(.÷=))))
     if update ≢ nothing
         lhs = Expr(:call, (:(+), :(-), :(*), :(/), :(\), :(^), :(&), :(|), :(⊻), :(÷))[update], ex.args[1], ex.args[2])
         ex = Expr(:(=), ex.args[1], lhs)
     end
     if Meta.isexpr(ex, :(=), 2) || Meta.isexpr(ex, :(.=), 2)
-        return Expr(:call, fast_materialize!, ex.args[1], broadcasted_expr!(ex.args[2]))
+        return Expr(:call, fast_materialize!, todotview(ex.args[1]), broadcasted_expr!(ex.args[2]))
     else
         return Expr(:call, fast_materialize, broadcasted_expr!(ex))
     end
