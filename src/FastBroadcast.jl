@@ -214,10 +214,21 @@ function pushsymname!(ex::Expr, base::Symbol, @nospecialize(arg))
         push!(ex.args, arg)
     end
 end
+function _goto(base::Symbol, i::Int, sym::Symbol)
+  Expr(:macrocall, sym, LineNumberNode(@__LINE__,Symbol(@__FILE__)), Symbol(base, "#label#", i))
+end
+goto(base::Symbol, i::Int) = _goto(base, i, Symbol("@goto"))
+label(base::Symbol, i::Int) = _goto(base, i, Symbol("@label"))
+
 function broadcast_codeinfo(ci)
     q = Expr(:block)
     base = gensym(:fastbroadcast)
+    gotos = Int[]
     for (i, code) ∈ enumerate(ci.code)
+        k = findfirst(==(i), gotos)
+        if k ≢ nothing
+            push!(q.args, label(base, i))
+        end
         if Meta.isexpr(code, :call)
             ex = Expr(:call)
             f = code.args[1]
@@ -228,7 +239,7 @@ function broadcast_codeinfo(ci)
             elseif f === GlobalRef(Base, :getindex)
                 push!(ex.args, Base.Broadcast.dotview)
             else
-                push!(ex.args, f)
+                pushsymname!(ex, base, f)
             end
             for arg ∈ @view(code.args[2:end])
                 pushsymname!(ex, base, arg)
@@ -238,8 +249,24 @@ function broadcast_codeinfo(ci)
             ex = Expr(:(=), Symbol(base, 's', code.args[1].id))
             pushsymname!(ex, base, code.args[2])
             push!(q.args, ex)
+        elseif VERSION ≥ v"1.6" && code isa Core.GotoIfNot
+            ex = Expr(:||)
+            pushsymname!(ex, base, code.cond)
+            push!(ex.args, goto(base, code.dest))
+            push!(q.args, ex)
+            push!(gotos, code.dest)
+        elseif VERSION < v"1.6" && Meta.isexpr(code, :gotoifnot)
+            ex = Expr(:||)
+            pushsymname!(ex, base, code.args[1])
+            gotodest::Int = code.args[2]
+            push!(ex.args, goto(base, gotodest))
+            push!(q.args, ex)
+            push!(gotos, gotodest)
+        elseif code isa Core.GotoNode
+            push!(q.args, goto(base, code.label))
+            push!(gotos, code.label)
         elseif !(VERSION ≥ v"1.6" ? isa(code, Core.ReturnNode) : Meta.isexpr(code, :return))
-          ex = Expr(:(=), Symbol(base, '_', i))
+            ex = Expr(:(=), Symbol(base, '_', i))
             pushsymname!(ex, base, code)
             push!(q.args, ex)
         end
