@@ -205,68 +205,52 @@ function walk_bc!(
     return nothing
 end
 
-# From Julia Base
-dottable(x) = x !== Base.maybeview
-# don't add dots to dot operators
-dottable(x::Symbol) = x !== :(:)
-
-function undotop(ex)
-    Meta.isexpr(ex, :call) || return ex
-    str = string(ex.args[1])
-    if first(str) == '.' && (op = Symbol(str[2:end]); Base.isoperator(op))
-        return Expr(:call, op, ex.args[2:end]...)
+function pushsymname!(ex::Expr, base::Symbol, @nospecialize(arg))
+    if arg isa Core.SSAValue
+        push!(ex.args, Symbol(base, '_', arg.id))
+    elseif arg isa Core.SlotNumber
+        push!(ex.args, Symbol(base, 's', arg.id))
     else
-        return ex
+        push!(ex.args, arg)
     end
 end
-
-function todotview(ex)
-    Meta.isexpr(ex, :ref) || return ex
-    q = Expr(:call, Base.Broadcast.dotview)
-    for a ∈ ex.args
-        push!(q.args, a)
+function broadcast_codeinfo(ci)
+    q = Expr(:block)
+    base = gensym(:fastbroadcast)
+    for (i, code) ∈ enumerate(ci.code)
+        if Meta.isexpr(code, :call)
+            ex = Expr(:call)
+            f = code.args[1]
+            if f === GlobalRef(Base, :materialize)
+                push!(ex.args, fast_materialize)
+            elseif f === GlobalRef(Base, :materialize!)
+                push!(ex.args, fast_materialize!)
+            elseif f === GlobalRef(Base, :getindex)
+                push!(ex.args, Base.Broadcast.dotview)
+            else
+                push!(ex.args, f)
+            end
+            for arg ∈ @view(code.args[2:end])
+                pushsymname!(ex, base, arg)
+            end
+            push!(q.args, Expr(:(=), Symbol(base, '_', i), ex))
+        elseif Meta.isexpr(code, :(=))
+            ex = Expr(:(=), Symbol(base, 's', code.args[1].id))
+            pushsymname!(ex, base, code.args[2])
+            push!(q.args, ex)
+        elseif !isa(code, Core.ReturnNode)
+            ex = Expr(:(=), Symbol(base, '_', i))
+            pushsymname!(ex, base, code)
+            push!(q.args, ex)
+        end
     end
     q
 end
 
-function broadcasted_expr!(_ex)
-    Meta.isexpr(_ex, :$) && return _ex.args[1]
-    if Meta.isexpr(_ex, :.) && Meta.isexpr(_ex.args[2], :tuple)
-        _ex = Expr(:call, _ex.args[1], _ex.args[2].args...)
-    elseif Meta.isexpr(_ex, :ref)
-        return todotview(_ex)
-    end
-    _ex = undotop(_ex)
-    Meta.isexpr(_ex, :call) || return _ex
-    Meta.isexpr(_ex.args[1], :$) && return Expr(:call, _ex.args[1].args[1], _ex.args[2:end]...)
-    dottable(_ex.args[1]) || return _ex
-    ex::Expr = _ex
-    call = Expr(:call, Base.Broadcast.broadcasted, ex.args[1])
-    for n ∈ 2:length(ex.args)
-        push!(call.args, broadcasted_expr!(ex.args[n]))
-    end
-    call
-end
-
-function broadcast_expr!(ex)
-    ex isa Expr || return ex
-    if ex.head === :let
-        return Expr(:let, ex.args[1], broadcast_expr!(ex.args[2]))
-    end
-    update = findfirst(Base.Fix1(Base.sym_in, ex.head), ((:(+=),:(.+=)), (:(-=),:(.-=)), (:(*=),:(.*=)), (:(/=),:(./=)), (:(\=),:(.\=)), (:(^=),:(.^=)), (:(&=),:(.&=)), (:(|=),:(.|=)), (:(⊻=),:(.⊻=)), (:(÷=),:(.÷=))))
-    if update ≢ nothing
-        lhs = Expr(:call, (:(+), :(-), :(*), :(/), :(\), :(^), :(&), :(|), :(⊻), :(÷))[update], ex.args[1], ex.args[2])
-        ex = Expr(:(=), ex.args[1], lhs)
-    end
-    if Meta.isexpr(ex, :(=), 2) || Meta.isexpr(ex, :(.=), 2)
-        return Expr(:call, fast_materialize!, todotview(ex.args[1]), broadcasted_expr!(ex.args[2]))
-    else
-        return Expr(:call, fast_materialize, broadcasted_expr!(ex))
-    end
-end
-
 macro (..)(ex)
-    esc(broadcast_expr!(macroexpand(__module__, ex)))
+    lowered = Meta.lower(__module__, Base.Broadcast.__dot__(ex))
+    lowered isa Expr || return esc(lowered)
+    esc(broadcast_codeinfo(lowered.args[1]))
 end
 
 end

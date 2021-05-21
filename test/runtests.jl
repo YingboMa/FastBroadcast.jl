@@ -61,6 +61,7 @@ if GROUP == "All" || GROUP == "Core"
         @test (@views @.. r[3:4] += x[2:3,1] + a) == [19,26]
         @test (@.. @views r[3:4] += x[2:3,1] + a) == [25,35]
         @test r == [5,6,25,35]
+        @test (@.. r + r[end]) == [40,41,60,70]
         @testset "Sparse" begin
             x = sparse([1, 2, 0, 4])
             y = sparse([1, 0, 0, 4])
