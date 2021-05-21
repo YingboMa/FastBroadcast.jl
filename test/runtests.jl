@@ -61,6 +61,11 @@ if GROUP == "All" || GROUP == "Core"
         @test (@views @.. r[3:4] += x[2:3,1] + a) == [19,26]
         @test (@.. @views r[3:4] += x[2:3,1] + a) == [25,35]
         @test r == [5,6,25,35]
+        @test (@.. r + r[end]) == [40,41,60,70]
+
+        Q = rand(5,2); k = 1; v = 100 .* rand(5); d = 5;
+        @.. @view(Q[:, k]) = v / d
+        @test Q ≈ hcat(v ./ d, @view(Q[:,2]))
         @testset "Sparse" begin
             x = sparse([1, 2, 0, 4])
             y = sparse([1, 0, 0, 4])
