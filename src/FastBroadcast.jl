@@ -220,6 +220,15 @@ end
 goto(base::Symbol, i::Int) = _goto(base, i, Symbol("@goto"))
 label(base::Symbol, i::Int) = _goto(base, i, Symbol("@label"))
 
+function add_gotoifnot!(q::Expr, gotos::Vector{Int}, base::Symbol, cond, dest::Int)
+    ex = Expr(:||)
+    pushsymname!(ex, base, cond)
+    push!(ex.args, goto(base, dest))
+    push!(q.args, ex)
+    push!(gotos, dest)
+    nothing
+end
+
 function broadcast_codeinfo(ci)
     q = Expr(:block)
     base = gensym(:fastbroadcast)
@@ -250,18 +259,9 @@ function broadcast_codeinfo(ci)
             pushsymname!(ex, base, code.args[2])
             push!(q.args, ex)
         elseif VERSION ≥ v"1.6" && code isa Core.GotoIfNot
-            ex = Expr(:||)
-            pushsymname!(ex, base, code.cond)
-            push!(ex.args, goto(base, code.dest))
-            push!(q.args, ex)
-            push!(gotos, code.dest)
+            add_gotoifnot!(q, gotos, base, code.cond, code.dest)
         elseif VERSION < v"1.6" && Meta.isexpr(code, :gotoifnot)
-            ex = Expr(:||)
-            pushsymname!(ex, base, code.args[1])
-            gotodest::Int = code.args[2]
-            push!(ex.args, goto(base, gotodest))
-            push!(q.args, ex)
-            push!(gotos, gotodest)
+            add_gotoifnot!(q, gotos, base, code.args[1], code.args[2])
         elseif code isa Core.GotoNode
             push!(q.args, goto(base, code.label))
             push!(gotos, code.label)
