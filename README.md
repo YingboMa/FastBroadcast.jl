@@ -31,3 +31,17 @@ julia> @btime fast_foo9($a, $b, $c, $d, $e, $f, $g, $h, $i);
 julia> @btime foo9($a, $b, $c, $d, $e, $f, $g, $h, $i);
   81.457 μs (0 allocations: 0 bytes)
 ```
+
+It's important to note that FastBroadcast doesn't speed up "dynamic broadcast",
+i.e. when the arguments are not equal-axised or scalars. For example, dynamic
+broadcast happens when the expansion of singleton dimensions occurs:
+
+```julia
+julia> b = [1.0];
+
+julia> @btime foo9($a, $b, $c, $d, $e, $f, $g, $h, $i);
+  70.634 μs (0 allocations: 0 bytes)
+
+julia> @btime fast_foo9($a, $b, $c, $d, $e, $f, $g, $h, $i);
+  131.470 μs (0 allocations: 0 bytes)
+```
