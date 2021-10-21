@@ -16,13 +16,13 @@ if GROUP == "All" || GROUP == "Core"
         dst = zeros(Int, 4)
         bc = Broadcast.Broadcasted(+, (Broadcast.Broadcasted(*, (x, y)), x, y, x, y, x, y))
         bcref = copy(bc)
-        @test FastBroadcast.fast_materialize!(dst, bc) == bcref
+        @test FastBroadcast.fast_materialize!(FastBroadcast.False(), dst, bc) == bcref
         dest = similar(bcref);
         @test (@.. dest = (x*y) + x + y + x + y + x + y) == bcref
         @test (@.. (x*y) + x + y + x + y + x + y) == bcref
-        @test (@.. dest .+= (x*y) + x + y + x + y + x + y) ≈ 2bcref
+        @test (@.. thread=true dest .+= (x*y) + x + y + x + y + x + y) ≈ 2bcref
         @test (@.. dest .-= (x*y) + x + y + x + y + x + y) ≈ bcref
-        @test (@.. dest *= (x*y) + x + y + x + y + x + y) ≈ abs2.(bcref)
+        @test (@.. thread=true dest *= (x*y) + x + y + x + y + x + y) ≈ abs2.(bcref)
         nt = (x = x,)
         @test (@.. (nt.x*y) + x + y + x*(3,4,5,6) + y + x * (1,) + y + 3) ≈ (@. (x*y) + x + y + x*(3,4,5,6) + y + nt.x * (1,) + y + 3)
         A = rand(4,4);
@@ -50,7 +50,7 @@ if GROUP == "All" || GROUP == "Core"
         @static if VERSION >= v"1.6"
             var".foo"(a) = a
             @views @.. a = var".foo".(b[1:2]) .+ $abs2(c)
-            @views @.. a = var".foo".(b[1:2]) .+ $(abs2(c))
+            @views @.. thread=true a = var".foo".(b[1:2]) .+ $(abs2(c))
             @test a == [4, 6]
         else
             a = [4, 6]

@@ -4,6 +4,7 @@ export @..
 
 using Base.Broadcast: Broadcasted
 using LinearAlgebra: Adjoint, Transpose
+using Static, Polyester
 
 getstyle(::Type{Broadcasted{S,Axes,F,Args}}) where {S,Axes,F,Args} = S
 getAxes(::Type{Broadcasted{S,Axes,F,Args}}) where {S,Axes,F,Args} = Axes
@@ -15,15 +16,15 @@ use_fast_broadcast(_) = false
 use_fast_broadcast(::Type{<:Base.Broadcast.DefaultArrayStyle}) = true
 use_fast_broadcast(::Type{<:Base.Broadcast.DefaultArrayStyle{0}}) = false
 
-@inline function fast_materialize(bc::Broadcasted{S}) where S
+@inline function fast_materialize(::SB, bc::Broadcasted{S}) where {S, SB}
     if use_fast_broadcast(S)
-        fast_materialize!(similar(bc, Base.Broadcast.combine_eltypes(bc.f, bc.args)), bc)
+        fast_materialize!(SB(), similar(bc, Base.Broadcast.combine_eltypes(bc.f, bc.args)), bc)
     else
         Base.Broadcast.materialize(bc)
     end
 end
 
-@inline function fast_materialize!(dst, bc::Broadcasted{S}) where S
+@inline function fast_materialize!(::False, dst, bc::Broadcasted{S}) where S
     if use_fast_broadcast(S)
         fast_materialize!(dst, bc, axes(dst), _get_axes(bc), _index_style(bc))
     else
@@ -73,6 +74,37 @@ end
         dst
     end
 end
+
+_view(A::AbstractArray{<:Any,N}, r, ::Val{N}) where {N} = view(A, ntuple(_ -> :, N-1)..., r)
+_view(A::AbstractArray, r, ::Val) = A
+_view(x, r, ::Val) = x
+__view(t::Tuple{T}, r, ::Val{N}) where {T,N} = (_view(first(t), r, Val(N)),)
+__view(t::Tuple{T,Vararg}, r, ::Val{N}) where {T,N} = (_view(first(t), r, Val(N)), __view(Base.tail(t), r, Val(N))...)
+function _view(bc::Base.Broadcast.Broadcasted{Base.Broadcast.DefaultArrayStyle{N},Nothing}, r, ::Val{N}) where {N}
+  Base.Broadcast.Broadcasted(bc.f, __view(bc.args, r, Val(N)), Val(N))
+end
+_view(bc::Base.Broadcast.Broadcasted{<:Base.Broadcast.DefaultArrayStyle}, r, ::Val{N}) where {N} = bc
+_view(t::Tuple{Vararg{AbstractRange,N}}, r, ::Val{N}) where {N} = (Base.front(t)..., r)
+
+function fast_materialize!(::True, dst, bc::Broadcasted{S}) where S
+    if use_fast_broadcast(S)
+        fast_materialize_threaded!(dst, bc, axes(dst))
+    else
+        Base.Broadcast.materialize!(dst, bc)
+    end
+end
+function fast_materialize_threaded!(dst, bc::Broadcasted, dstaxes::Tuple{Vararg{Any,N}}) where {N}
+    last_dstaxes = dstaxes[N]
+    Polyester.batch(
+        (length(last_dstaxes), Threads.nthreads()), dst, last_dstaxes, bc, Val(N)
+    ) do (dest, ldstaxes, bcobj, VN), start, stop
+        r = ldstaxes[start:stop]
+        fast_materialize!(False(), _view(dest, r, VN), _view(bcobj, r, VN))
+    end
+    return dst
+end
+
+
 @inline _get_axes(x) = axes(x)
 @inline _get_axes(bc::Broadcasted) = map(_get_axes, bc.args)
 @inline __index_style(_) = Val{false}()
@@ -100,8 +132,8 @@ end
   end
 end
 
-fast_materialize!(dest, x::Number) = fill!(dest, x)
-fast_materialize!(dest, x::AbstractArray) = copyto!(dest, x)
+fast_materialize!(_, dest, x::Number) = fill!(dest, x)
+fast_materialize!(_, dest, x::AbstractArray) = copyto!(dest, x)
 
 safeivdep(_) = false
 safeivdep(::Type{Array{T,N}}) where {T <: Union{Bool,Base.HWNumber},N} = true
@@ -229,7 +261,7 @@ function add_gotoifnot!(q::Expr, gotos::Vector{Int}, base::Symbol, cond, dest::I
     nothing
 end
 
-function broadcast_codeinfo(ci)
+function broadcast_codeinfo(ci, threadarg)
     q = Expr(:block)
     base = gensym(:fastbroadcast)
     gotos = Int[]
@@ -242,9 +274,9 @@ function broadcast_codeinfo(ci)
             ex = Expr(:call)
             f = code.args[1]
             if f === GlobalRef(Base, :materialize)
-                push!(ex.args, fast_materialize)
+                push!(ex.args, fast_materialize, threadarg)
             elseif f === GlobalRef(Base, :materialize!)
-                push!(ex.args, fast_materialize!)
+                push!(ex.args, fast_materialize!, threadarg)
             elseif f === GlobalRef(Base, :getindex)
                 push!(ex.args, Base.Broadcast.dotview)
             else
@@ -274,10 +306,24 @@ function broadcast_codeinfo(ci)
     q
 end
 
-macro (..)(ex)
-    lowered = Meta.lower(__module__, Base.Broadcast.__dot__(ex))
+function fb_macro(ex, mod, threadarg)
+    lowered = Meta.lower(mod, Base.Broadcast.__dot__(ex))
     lowered isa Expr || return esc(lowered)
-    esc(broadcast_codeinfo(lowered.args[1]))
+    esc(broadcast_codeinfo(lowered.args[1], threadarg))
+end
+
+macro (..)(ex)
+    fb_macro(ex, __module__, False())
+end
+
+macro (..)(kwarg, ex)
+    @assert Meta.isexpr(kwarg, :(=), 2)
+    @assert kwarg.args[1] === :thread
+    threadarg = kwarg.args[2]
+    if threadarg isa Bool
+        threadarg = threadarg ? True() : False()
+    end
+    fb_macro(ex, __module__, threadarg)
 end
 
 end
