@@ -45,3 +45,40 @@ julia> @btime foo9($a, $b, $c, $d, $e, $f, $g, $h, $i);
 julia> @btime fast_foo9($a, $b, $c, $d, $e, $f, $g, $h, $i);
   131.470 μs (0 allocations: 0 bytes)
 ```
+
+The macro `@..` of FastBroadcast.jl accepts a keyword argument `thread` 
+determining whether the broadcast call should use threading (disabled
+by default). You can use it as follows (starting Julia with multiple 
+threads).
+```julia
+julia> using FastBroadcast
+
+julia> function foo_serial!(dest, src)
+           @.. thread=false dest = log(src)
+       end
+foo_serial! (generic function with 1 method)
+
+julia> function foo_parallel!(dest, src)
+           @.. thread=true dest = log(src)
+       end
+foo_parallel! (generic function with 1 method)
+
+julia> function foo_maybe_parallel!(dest, src, thread)
+           @.. thread=thread dest = log(src)
+       end
+foo_maybe_parallel! (generic function with 1 method)
+
+julia> src = rand(10^4); dest = similar(src);
+
+julia> @btime foo_serial!($dest, $src);
+  50.860 μs (0 allocations: 0 bytes)
+
+julia> @btime foo_parallel!($dest, $src);
+  17.245 μs (1 allocation: 48 bytes)
+
+julia> @btime foo_maybe_parallel!($dest, $src, $FastBroadcast.False());
+  51.682 μs (0 allocations: 0 bytes)
+
+julia> @btime foo_maybe_parallel!($dest, $src, $FastBroadcast.True());
+  17.360 μs (1 allocation: 48 bytes)
+```
