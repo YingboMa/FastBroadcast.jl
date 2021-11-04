@@ -32,49 +32,6 @@ end
     end
 end
 
-@generated function fast_materialize!(dst, bc::Broadcasted, dstaxes::Tuple{Vararg{Any,N}}, ax, indexstyle) where {N}
-    loopbody_lin = :($setindex!(dst))
-    loopbody_car = :($setindex!(dst))
-    loopbody_slow = :($setindex!(dst))
-    bcc = BroadcastCharacteristics()
-    ii = map(i->Symbol(:i_, i), 1:N)
-
-    walk_bc!(
-        bcc, loopbody_lin, loopbody_car, loopbody_slow,
-        ii, bc, :bc, ax, :ax
-       )
-    push!(loopbody_lin.args, :i)
-    append!(loopbody_car.args, ii)
-    append!(loopbody_slow.args, ii)
-    loop_quote = if !(bcc.maybelinear && (indexstyle === IndexLinear))
-        :(@inbounds Base.Cartesian.@nloops $N i dst begin
-            $loopbody_car
-        end)
-    elseif bcc.maybeivdep
-        :(@inbounds @simd ivdep for i in $eachindex(dst)
-            $loopbody_lin
-        end)
-    else
-        :(@inbounds @simd for i in $eachindex(dst)
-            $loopbody_lin
-        end)
-    end
-    quote
-        $(Expr(:meta,:inline))
-        isfast = true
-        (Base.Cartesian.@ntuple $N dstaxis) = dstaxes
-        $(bcc.loopheader)
-        if isfast
-            $loop_quote
-        else
-            Base.Cartesian.@nloops $N i dst begin
-                $loopbody_slow
-            end
-        end
-        dst
-    end
-end
-
 _view(A::AbstractArray{<:Any,N}, r, ::Val{N}) where {N} = view(A, ntuple(_ -> :, N-1)..., r)
 _view(A::AbstractArray, r, ::Val) = A
 _view(x, r, ::Val) = x
@@ -324,6 +281,49 @@ macro (..)(kwarg, ex)
         threadarg = threadarg ? True() : False()
     end
     fb_macro(ex, __module__, threadarg)
+end
+
+@generated function fast_materialize!(dst, bc::Broadcasted, dstaxes::Tuple{Vararg{Any,N}}, ax, indexstyle) where {N}
+    loopbody_lin = :($setindex!(dst))
+    loopbody_car = :($setindex!(dst))
+    loopbody_slow = :($setindex!(dst))
+    bcc = BroadcastCharacteristics()
+    ii = map(i->Symbol(:i_, i), 1:N)
+
+    walk_bc!(
+        bcc, loopbody_lin, loopbody_car, loopbody_slow,
+        ii, bc, :bc, ax, :ax
+       )
+    push!(loopbody_lin.args, :i)
+    append!(loopbody_car.args, ii)
+    append!(loopbody_slow.args, ii)
+    loop_quote = if !(bcc.maybelinear && (indexstyle === IndexLinear))
+        :(@inbounds Base.Cartesian.@nloops $N i dst begin
+            $loopbody_car
+        end)
+    elseif bcc.maybeivdep
+        :(@inbounds @simd ivdep for i in $eachindex(dst)
+            $loopbody_lin
+        end)
+    else
+        :(@inbounds @simd for i in $eachindex(dst)
+            $loopbody_lin
+        end)
+    end
+    quote
+        $(Expr(:meta,:inline))
+        isfast = true
+        (Base.Cartesian.@ntuple $N dstaxis) = dstaxes
+        $(bcc.loopheader)
+        if isfast
+            $loop_quote
+        else
+            Base.Cartesian.@nloops $N i dst begin
+                $loopbody_slow
+            end
+        end
+        dst
+    end
 end
 
 end
