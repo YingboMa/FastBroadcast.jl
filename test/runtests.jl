@@ -16,13 +16,22 @@ if GROUP == "All" || GROUP == "Core"
         dst = zeros(Int, 4)
         bc = Broadcast.Broadcasted(+, (Broadcast.Broadcasted(*, (x, y)), x, y, x, y, x, y))
         bcref = copy(bc)
-        @test FastBroadcast.fast_materialize!(FastBroadcast.False(), dst, bc) == bcref
+        @test FastBroadcast.fast_materialize!(FastBroadcast.False(), FastBroadcast.True(), dst, bc) == bcref
+        @test FastBroadcast.fast_materialize!(FastBroadcast.False(), FastBroadcast.False(), dst, bc) == bcref
         dest = similar(bcref);
         @test (@.. dest = (x*y) + x + y + x + y + x + y) == bcref
         @test (@.. (x*y) + x + y + x + y + x + y) == bcref
         @test (@.. thread=true dest .+= (x*y) + x + y + x + y + x + y) ≈ 2bcref
         @test (@.. dest .-= (x*y) + x + y + x + y + x + y) ≈ bcref
         @test (@.. thread=true dest *= (x*y) + x + y + x + y + x + y) ≈ abs2.(bcref)
+
+        @test (@.. broadcast=false dest = (x*y) + x + y + x + y + x + y) == bcref
+        @test (@.. broadcast=false (x*y) + x + y + x + y + x + y) == bcref
+        @test (@.. broadcast=false thread=true dest .+= (x*y) + x + y + x + y + x + y) ≈ 2bcref
+        @test (@.. broadcast=false dest .-= (x*y) + x + y + x + y + x + y) ≈ bcref
+        @test (@.. broadcast=false thread=true dest *= (x*y) + x + y + x + y + x + y) ≈ abs2.(bcref)
+
+
         nt = (x = x,)
         @test (@.. (nt.x*y) + x + y + x*(3,4,5,6) + y + x * (1,) + y + 3) ≈ (@. (x*y) + x + y + x*(3,4,5,6) + y + nt.x * (1,) + y + 3)
         A = rand(4,4);
