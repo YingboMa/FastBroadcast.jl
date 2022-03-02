@@ -1,7 +1,7 @@
 name = "FastBroadcast"
 uuid = "7034ab61-46d4-4ed7-9d0f-46aef9175898"
 authors = ["Yingbo Ma <mayingbo5@gmail.com> and Chris Elrod <elrodc@gmail.com>"]
-version = "0.1.11"
+version = "0.1.14"
 
 [deps]
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
@@ -10,7 +10,7 @@ Static = "aedffcd0-7271-4cad-89d0-dc628f76c6d3"
 
 [compat]
 Polyester = "0.5, 0.6"
-Static = "0.3, 0.4"
+Static = "0.3, 0.4, 0.6"
 julia = "1.5"
 
 [extras]
