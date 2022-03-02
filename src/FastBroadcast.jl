@@ -302,7 +302,6 @@ macro (..)(kwarg0, kwarg1, ex)
 end
 
 @generated function fast_materialize!(dst, ::DB, bc::Broadcasted, dstaxes::Tuple{Vararg{Any,N}}, ax, indexstyle) where {N,DB}
-    broadcast = DB === True
     loopbody_lin = :($setindex!(dst))
     loopbody_car = :($setindex!(dst))
     loopbody_slow = :($setindex!(dst))
