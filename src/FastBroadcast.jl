@@ -16,17 +16,17 @@ use_fast_broadcast(_) = false
 use_fast_broadcast(::Type{<:Base.Broadcast.DefaultArrayStyle}) = true
 use_fast_broadcast(::Type{<:Base.Broadcast.DefaultArrayStyle{0}}) = false
 
-@inline function fast_materialize(::SB, bc::Broadcasted{S}) where {S, SB}
+@inline function fast_materialize(::SB, ::DB, bc::Broadcasted{S}) where {S, SB, DB}
     if use_fast_broadcast(S)
-        fast_materialize!(SB(), similar(bc, Base.Broadcast.combine_eltypes(bc.f, bc.args)), bc)
+        fast_materialize!(SB(), DB(), similar(bc, Base.Broadcast.combine_eltypes(bc.f, bc.args)), bc)
     else
         Base.Broadcast.materialize(bc)
     end
 end
 
-@inline function fast_materialize!(::False, dst, bc::Broadcasted{S}) where S
+@inline function fast_materialize!(::False, ::DB, dst, bc::Broadcasted{S}) where {S, DB}
     if use_fast_broadcast(S)
-        fast_materialize!(dst, bc, axes(dst), _get_axes(bc), _index_style(bc))
+        fast_materialize!(dst, DB(), bc, axes(dst), _get_axes(bc), _index_style(bc))
     else
         Base.Broadcast.materialize!(dst, bc)
     end
@@ -43,20 +43,20 @@ end
 _view(bc::Base.Broadcast.Broadcasted{<:Base.Broadcast.DefaultArrayStyle}, r, ::Val{N}) where {N} = bc
 _view(t::Tuple{Vararg{AbstractRange,N}}, r, ::Val{N}) where {N} = (Base.front(t)..., r)
 
-function fast_materialize!(::True, dst, bc::Broadcasted{S}) where S
+function fast_materialize!(::True, ::DB, dst, bc::Broadcasted{S}) where {S, DB}
     if use_fast_broadcast(S)
-        fast_materialize_threaded!(dst, bc, axes(dst))
+        fast_materialize_threaded!(dst, DB(), bc, axes(dst))
     else
         Base.Broadcast.materialize!(dst, bc)
     end
 end
-function fast_materialize_threaded!(dst, bc::Broadcasted, dstaxes::Tuple{Vararg{Any,N}}) where {N}
+function fast_materialize_threaded!(dst, ::DB, bc::Broadcasted, dstaxes::Tuple{Vararg{Any,N}}) where {N,DB}
     last_dstaxes = dstaxes[N]
     Polyester.batch(
-        (length(last_dstaxes), Threads.nthreads()), dst, last_dstaxes, bc, Val(N)
-    ) do (dest, ldstaxes, bcobj, VN), start, stop
+        (length(last_dstaxes), Threads.nthreads()), dst, last_dstaxes, bc, Val(N), DB()
+    ) do (dest, ldstaxes, bcobj, VN, DoBroadcast), start, stop
         r = ldstaxes[start:stop]
-        fast_materialize!(False(), _view(dest, r, VN), _view(bcobj, r, VN))
+        fast_materialize!(False(), DoBroadcast, _view(dest, r, VN), _view(bcobj, r, VN))
     end
     return dst
 end
@@ -218,7 +218,7 @@ function add_gotoifnot!(q::Expr, gotos::Vector{Int}, base::Symbol, cond, dest::I
     nothing
 end
 
-function broadcast_codeinfo(ci, threadarg)
+function broadcast_codeinfo(ci, threadarg, broadcastarg)
     q = Expr(:block)
     base = gensym(:fastbroadcast)
     gotos = Int[]
@@ -231,9 +231,9 @@ function broadcast_codeinfo(ci, threadarg)
             ex = Expr(:call)
             f = code.args[1]
             if f === GlobalRef(Base, :materialize)
-                push!(ex.args, fast_materialize, threadarg)
+                push!(ex.args, fast_materialize, threadarg, broadcastarg)
             elseif f === GlobalRef(Base, :materialize!)
-                push!(ex.args, fast_materialize!, threadarg)
+                push!(ex.args, fast_materialize!, threadarg, broadcastarg)
             elseif f === GlobalRef(Base, :getindex)
                 push!(ex.args, Base.Broadcast.dotview)
             else
@@ -263,27 +263,45 @@ function broadcast_codeinfo(ci, threadarg)
     q
 end
 
-function fb_macro(ex, mod, threadarg)
+function fb_macro(ex, mod, threadarg, broadcastarg)
     lowered = Meta.lower(mod, Base.Broadcast.__dot__(ex))
     lowered isa Expr || return esc(lowered)
-    esc(broadcast_codeinfo(lowered.args[1], threadarg))
+    esc(broadcast_codeinfo(lowered.args[1], threadarg, broadcastarg))
 end
 
 macro (..)(ex)
-    fb_macro(ex, __module__, False())
+    fb_macro(ex, __module__, False(), True())
+end
+
+function __process_kwarg(kwarg)
+    threadarg = kwarg.args[2]
+    threadarg isa Bool ? (threadarg ? True() : False()) : threadarg
+end
+function _validate_kwarg(kwarg)
+    @assert Meta.isexpr(kwarg, :(=), 2)
+    argname = kwarg.args[1]
+    @assert (argname === :thread) || (argname === :broadcast)
+    argname === :thread
+end
+function _process_kwarg(kwarg, threadarg = False(), broadcastarg = True())
+    if _validate_kwarg(kwarg)
+        return __process_kwarg(kwarg), broadcastarg
+    else
+        return threadarg, __process_kwarg(kwarg)
+    end
 end
 
 macro (..)(kwarg, ex)
-    @assert Meta.isexpr(kwarg, :(=), 2)
-    @assert kwarg.args[1] === :thread
-    threadarg = kwarg.args[2]
-    if threadarg isa Bool
-        threadarg = threadarg ? True() : False()
-    end
-    fb_macro(ex, __module__, threadarg)
+    threadarg, broadcastarg = _process_kwarg(kwarg)
+    fb_macro(ex, __module__, threadarg, broadcastarg)
+end
+macro (..)(kwarg0, kwarg1, ex)
+    threadarg, broadcastarg = _process_kwarg(kwarg0)
+    threadarg, broadcastarg = _process_kwarg(kwarg1, threadarg, broadcastarg)
+    fb_macro(ex, __module__, threadarg, broadcastarg)
 end
 
-@generated function fast_materialize!(dst, bc::Broadcasted, dstaxes::Tuple{Vararg{Any,N}}, ax, indexstyle) where {N}
+@generated function fast_materialize!(dst, ::DB, bc::Broadcasted, dstaxes::Tuple{Vararg{Any,N}}, ax, indexstyle) where {N,DB}
     loopbody_lin = :($setindex!(dst))
     loopbody_car = :($setindex!(dst))
     loopbody_slow = :($setindex!(dst))
@@ -310,20 +328,25 @@ end
             $loopbody_lin
         end)
     end
-    quote
+    q = quote
         $(Expr(:meta,:inline))
         isfast = true
         (Base.Cartesian.@ntuple $N dstaxis) = dstaxes
         $(bcc.loopheader)
-        if isfast
+    end
+    if DB === False
+        push!(q.args, loop_quote)
+    else
+        push!(q.args, :(if isfast
             $loop_quote
         else
             Base.Cartesian.@nloops $N i dst begin
                 $loopbody_slow
             end
-        end
-        dst
+        end))
     end
+    push!(q.args, :dst)
+    return q
 end
 
 end
