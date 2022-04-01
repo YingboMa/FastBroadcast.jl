@@ -82,7 +82,7 @@ end
 
 @inline _index_style(bc::Broadcasted) = _index_style(_index_style(first(bc.args)), Base.tail(bc.args))
 
-@generated function broadcastgetindex(A, i::Vararg{Int,N}) where {N}
+@generated function broadcastgetindex(A, i::Vararg{Any,N}) where {N}
   quote
     $(Expr(:meta,:inline))
     Base.Cartesian.@nref $N A n -> ifelse(size(A, n) == 1, firstindex(A, n), i[n])
@@ -132,23 +132,14 @@ function walk_bc!(
             new_arg = gensym(:x)
             push!(bcc.loopheader.args, :($new_arg = $bcsym.args[$i]))
             nd::Int = length(ii)
-            if (arg <: Adjoint{<:Any,<:AbstractVector}) || (arg <: Transpose{<:Any,<:AbstractVector})
+            if (arg <: Adjoint{<:Any,<:AbstractVector}) || (arg <: Transpose{<:Any,<:AbstractVector}) ||
+                (arg <: SubArray{<:Any, 2, <:Adjoint{<:Any, <:AbstractVector}, <:Tuple{Base.Slice{Base.OneTo{Int}}, <:AbstractVector}}) ||
+                (arg <: SubArray{<:Any, 2, <:Transpose{<:Any, <:AbstractVector}, <:Tuple{Base.Slice{Base.OneTo{Int}}, <:AbstractVector}})
                 push!(bcc.arrays, new_arg)
                 bcc.maybelinear = false
-                new_arg_parent = Symbol(new_arg, "##parent##")
-                push!(bcc.loopheader.args, :($new_arg_parent = parent($new_arg)))
-                push!(bcc.loopheader.args, :(isfast &= axes($new_arg_parent,1) == dstaxis_2))
-                index = :($new_arg_parent[$(ii[2])])
-                slowindex = :(broadcastgetindex($new_arg_parent, $(ii[2])))
-                if eltype(arg) <: Base.HWReal
-                    nothing # `adjoint` and `transpose` are the identity
-                elseif (arg <: Adjoint)
-                    index = :(adjoint($index))
-                    slowindex = :(adjoint($slowindex))
-                else
-                    index = :(transpose($index))
-                    slowindex = :(transpose($slowindex))
-                end
+                push!(bcc.loopheader.args, :(isfast &= axes($new_arg,2) == dstaxis_2))
+                index = :($new_arg[1, $(ii[2])])
+                slowindex = :(broadcastgetindex($new_arg, 1, $(ii[2])))
                 push!(new_loopbody_car.args, index)
                 push!(new_loopbody_slow.args, slowindex)
             elseif arg <: Tuple
@@ -301,13 +292,13 @@ macro (..)(kwarg0, kwarg1, ex)
     fb_macro(ex, __module__, threadarg, broadcastarg)
 end
 
+const DEBUG = Ref(false)
 @generated function fast_materialize!(dst, ::DB, bc::Broadcasted, dstaxes::Tuple{Vararg{Any,N}}, ax, indexstyle) where {N,DB}
     loopbody_lin = :($setindex!(dst))
     loopbody_car = :($setindex!(dst))
     loopbody_slow = :($setindex!(dst))
     bcc = BroadcastCharacteristics()
     ii = map(i->Symbol(:i_, i), 1:N)
-
     walk_bc!(
         bcc, loopbody_lin, loopbody_car, loopbody_slow,
         ii, bc, :bc, ax, :ax
@@ -335,7 +326,15 @@ end
         $(bcc.loopheader)
     end
     if DB === False
-        push!(q.args, loop_quote)
+        if DEBUG[]
+            push!(q.args, :(if isfast
+                $loop_quote
+            else
+                throw(ArgumentError("AHHH!"))
+            end))
+        else
+            push!(q.args, loop_quote)
+        end
     else
         push!(q.args, :(if isfast
             $loop_quote

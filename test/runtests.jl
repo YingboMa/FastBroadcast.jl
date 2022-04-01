@@ -2,6 +2,8 @@ using FastBroadcast
 using SparseArrays
 using PerformanceTestTools, Test
 
+FastBroadcast.DEBUG[] = true
+
 const GROUP = get(ENV, "GROUP", "All")
 
 function activate_downstream_env()
@@ -87,6 +89,13 @@ if GROUP == "All" || GROUP == "Core"
             res = @.. x = x + y
             @test res isa SparseVector
             @test res == [3, 4, 0, 12]
+        end
+        let
+            N = 4; A = randn(N, N); C = similar(A); d = rand(N)
+            dt = transpose(d)  # could also use permutedims, same problem
+            @.. thread=true broadcast=false C = A * dt
+            @test C ≈ A .* dt
+            @test_throws ArgumentError @.. broadcast=false A * [1.0]
         end
     end
 
