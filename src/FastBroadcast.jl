@@ -50,14 +50,17 @@ function fast_materialize!(::True, ::DB, dst, bc::Broadcasted{S}) where {S, DB}
         Base.Broadcast.materialize!(dst, bc)
     end
 end
+@inline function _batch_broadcast_fn((dest, ldstaxes, bcobj, VN, DoBroadcast), start, stop)
+    r = @inbounds ldstaxes[start:stop]
+    fast_materialize!(False(), DoBroadcast, _view(dest, r, VN), _view(bcobj, r, VN))
+    return nothing
+end
 function fast_materialize_threaded!(dst, ::DB, bc::Broadcasted, dstaxes::Tuple{Vararg{Any,N}}) where {N,DB}
     last_dstaxes = dstaxes[N]
     Polyester.batch(
+        _batch_broadcast_fn,
         (length(last_dstaxes), Threads.nthreads()), dst, last_dstaxes, bc, Val(N), DB()
-    ) do (dest, ldstaxes, bcobj, VN, DoBroadcast), start, stop
-        r = ldstaxes[start:stop]
-        fast_materialize!(False(), DoBroadcast, _view(dest, r, VN), _view(bcobj, r, VN))
-    end
+    )
     return dst
 end
 
@@ -83,10 +86,10 @@ end
 @inline _index_style(bc::Broadcasted) = _index_style(_index_style(first(bc.args)), Base.tail(bc.args))
 
 @generated function broadcastgetindex(A, i::Vararg{Any,N}) where {N}
-  quote
-    $(Expr(:meta,:inline))
-    Base.Cartesian.@nref $N A n -> ifelse(size(A, n) == 1, firstindex(A, n), i[n])
-  end
+    quote
+        $(Expr(:meta,:inline))
+        Base.Cartesian.@nref $N A n -> ifelse(size(A, n) == 1, (firstindex(A, n)%Int)::Int, (i[n]%Int)::Int)
+    end
 end
 
 fast_materialize!(_, dest, x::Number) = fill!(dest, x)
