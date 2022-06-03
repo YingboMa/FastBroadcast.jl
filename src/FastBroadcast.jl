@@ -5,6 +5,7 @@ export @..
 using Base.Broadcast: Broadcasted
 using LinearAlgebra: Adjoint, Transpose
 using Static, Polyester
+using StrideArraysCore: AbstractStrideArray
 
 getstyle(::Type{Broadcasted{S,Axes,F,Args}}) where {S,Axes,F,Args} = S
 getAxes(::Type{Broadcasted{S,Axes,F,Args}}) where {S,Axes,F,Args} = Axes
@@ -100,6 +101,7 @@ safeivdep(::Type{Array{T,N}}) where {T <: Union{Bool,Base.HWNumber},N} = true
 safeivdep(::Type{Adjoint{T,Array{T,N}}}) where {T <: Union{Bool,Base.HWNumber}, N} = true
 safeivdep(::Type{Transpose{T,Array{T,N}}}) where {T <: Union{Bool,Base.HWNumber}, N} = true
 safeivdep(::Type{<:SubArray{T,N,Array{T,M}}}) where {T <: Union{Bool,Base.HWNumber}, N, M} = true
+safeivdep(::Type{<:AbstractStrideArray{<:Any,<:Any,T}}) where {T <: Union{Bool,Base.HWNumber}} = true
 
 mutable struct BroadcastCharacteristics
     loopheader::Expr
