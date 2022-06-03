@@ -97,6 +97,7 @@ if GROUP == "All" || GROUP == "Core"
             @test C ≈ A .* dt
             @test_throws ArgumentError @.. broadcast=false A * [1.0]
         end
+        @test FastBroadcast.safeivdep(typeof(view(fill(0,10), 1:4)))
     end
 
     VERSION >= v"1.6" && PerformanceTestTools.@include("vectorization_tests.jl")

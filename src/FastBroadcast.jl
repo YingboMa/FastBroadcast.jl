@@ -99,7 +99,7 @@ safeivdep(_) = false
 safeivdep(::Type{Array{T,N}}) where {T <: Union{Bool,Base.HWNumber},N} = true
 safeivdep(::Type{Adjoint{T,Array{T,N}}}) where {T <: Union{Bool,Base.HWNumber}, N} = true
 safeivdep(::Type{Transpose{T,Array{T,N}}}) where {T <: Union{Bool,Base.HWNumber}, N} = true
-safeivdep(::Type{SubArray{T,N,Array{T,M}}}) where {T <: Union{Bool,Base.HWNumber}, N, M} = true
+safeivdep(::Type{<:SubArray{T,N,Array{T,M}}}) where {T <: Union{Bool,Base.HWNumber}, N, M} = true
 
 mutable struct BroadcastCharacteristics
     loopheader::Expr
