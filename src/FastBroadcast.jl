@@ -2,6 +2,8 @@ module FastBroadcast
 
 export @..
 
+using ArrayInterfaceCore: indices_do_not_alias
+using ArrayInterface: known_length
 using Base.Broadcast: Broadcasted
 using LinearAlgebra: Adjoint, Transpose
 using Static, Polyester
@@ -17,34 +19,57 @@ use_fast_broadcast(_) = false
 use_fast_broadcast(::Type{<:Base.Broadcast.DefaultArrayStyle}) = true
 use_fast_broadcast(::Type{<:Base.Broadcast.DefaultArrayStyle{0}}) = false
 
-@inline function fast_materialize(::SB, ::DB, bc::Broadcasted{S}) where {S, SB, DB}
+@inline function fast_materialize(::SB, ::DB, bc::Broadcasted{S}) where {S,SB,DB}
     if use_fast_broadcast(S)
-        fast_materialize!(SB(), DB(), similar(bc, Base.Broadcast.combine_eltypes(bc.f, bc.args)), bc)
+        fast_materialize!(
+            SB(),
+            DB(),
+            similar(bc, Base.Broadcast.combine_eltypes(bc.f, bc.args)),
+            bc,
+        )
     else
         Base.Broadcast.materialize(bc)
     end
 end
 
-@inline function fast_materialize!(::False, ::DB, dst, bc::Broadcasted{S}) where {S, DB}
+@inline function fast_materialize!(::False, ::DB, dst::A, bc::Broadcasted{S}) where {S,DB,A}
     if use_fast_broadcast(S)
-        fast_materialize!(dst, DB(), bc, axes(dst), _get_axes(bc), _index_style(bc))
+        _fast_materialize!(
+            dst,
+            Val(indices_do_not_alias(A)),
+            DB(),
+            bc,
+            axes(dst),
+            _get_axes(bc),
+            _index_style(bc),
+        )
     else
         Base.Broadcast.materialize!(dst, bc)
     end
 end
 
-_view(A::AbstractArray{<:Any,N}, r, ::Val{N}) where {N} = view(A, ntuple(_ -> :, N-1)..., r)
+_view(A::AbstractArray{<:Any,N}, r, ::Val{N}) where {N} =
+    view(A, ntuple(_ -> :, N - 1)..., r)
 _view(A::AbstractArray, r, ::Val) = A
 _view(x, r, ::Val) = x
 __view(t::Tuple{T}, r, ::Val{N}) where {T,N} = (_view(first(t), r, Val(N)),)
-__view(t::Tuple{T,Vararg}, r, ::Val{N}) where {T,N} = (_view(first(t), r, Val(N)), __view(Base.tail(t), r, Val(N))...)
-function _view(bc::Base.Broadcast.Broadcasted{Base.Broadcast.DefaultArrayStyle{N},Nothing}, r, ::Val{N}) where {N}
-  Base.Broadcast.Broadcasted(bc.f, __view(bc.args, r, Val(N)), Val(N))
+__view(t::Tuple{T,Vararg}, r, ::Val{N}) where {T,N} =
+    (_view(first(t), r, Val(N)), __view(Base.tail(t), r, Val(N))...)
+function _view(
+    bc::Base.Broadcast.Broadcasted{Base.Broadcast.DefaultArrayStyle{N},Nothing},
+    r,
+    ::Val{N},
+) where {N}
+    Base.Broadcast.Broadcasted(bc.f, __view(bc.args, r, Val(N)), Val(N))
 end
-_view(bc::Base.Broadcast.Broadcasted{<:Base.Broadcast.DefaultArrayStyle}, r, ::Val{N}) where {N} = bc
+_view(
+    bc::Base.Broadcast.Broadcasted{<:Base.Broadcast.DefaultArrayStyle},
+    r,
+    ::Val{N},
+) where {N} = bc
 _view(t::Tuple{Vararg{AbstractRange,N}}, r, ::Val{N}) where {N} = (Base.front(t)..., r)
 
-function fast_materialize!(::True, ::DB, dst, bc::Broadcasted{S}) where {S, DB}
+function fast_materialize!(::True, ::DB, dst, bc::Broadcasted{S}) where {S,DB}
     if use_fast_broadcast(S)
         fast_materialize_threaded!(dst, DB(), bc, axes(dst))
     else
@@ -56,11 +81,21 @@ end
     fast_materialize!(False(), DoBroadcast, _view(dest, r, VN), _view(bcobj, r, VN))
     return nothing
 end
-function fast_materialize_threaded!(dst, ::DB, bc::Broadcasted, dstaxes::Tuple{Vararg{Any,N}}) where {N,DB}
+function fast_materialize_threaded!(
+    dst,
+    ::DB,
+    bc::Broadcasted,
+    dstaxes::Tuple{Vararg{Any,N}},
+) where {N,DB}
     last_dstaxes = dstaxes[N]
     Polyester.batch(
         _batch_broadcast_fn,
-        (length(last_dstaxes), Threads.nthreads()), dst, last_dstaxes, bc, Val(N), DB()
+        (length(last_dstaxes), Threads.nthreads()),
+        dst,
+        last_dstaxes,
+        bc,
+        Val(N),
+        DB(),
     )
     return dst
 end
@@ -76,7 +111,8 @@ end
 @inline _index_style(::IndexLinear, x) = _index_style(x)
 @inline _index_style(::IndexLinear, x::Tuple{}) = IndexLinear()
 @inline _index_style(::IndexLinear, x::Tuple{T}) where {T} = _index_style(first(x))
-@inline _index_style(::IndexLinear, x::Tuple{T,S,Vararg}) where {T,S} = _index_style(_index_style(first(x)), Base.tail(x))
+@inline _index_style(::IndexLinear, x::Tuple{T,S,Vararg}) where {T,S} =
+    _index_style(_index_style(first(x)), Base.tail(x))
 
 @inline _index_style(x) = IndexStyle(typeof(x)) # require `IndexStyle` to be defined
 @inline _index_style(x::Tuple) = IndexLinear()
@@ -84,83 +120,89 @@ end
 @inline _index_style(x::Ref) = IndexLinear()
 @inline _index_style(x::AbstractArray) = IndexStyle(x)
 
-@inline _index_style(bc::Broadcasted) = _index_style(_index_style(first(bc.args)), Base.tail(bc.args))
+@inline _index_style(bc::Broadcasted) =
+    _index_style(_index_style(first(bc.args)), Base.tail(bc.args))
 
 @generated function broadcastgetindex(A, i::Vararg{Any,N}) where {N}
     quote
-        $(Expr(:meta,:inline))
-        Base.Cartesian.@nref $N A n -> ifelse(size(A, n) == 1, (firstindex(A, n)%Int)::Int, (i[n]%Int)::Int)
+        $(Expr(:meta, :inline))
+        Base.Cartesian.@nref $N A n ->
+            ifelse(size(A, n) == 1, (firstindex(A, n) % Int)::Int, (i[n] % Int)::Int)
     end
 end
 
-fast_materialize!(_, dest, x::Number) = fill!(dest, x)
-fast_materialize!(_, dest, x::AbstractArray) = copyto!(dest, x)
-
-safeivdep(_) = false
-safeivdep(::Type{Array{T,N}}) where {T <: Union{Bool,Base.HWNumber},N} = true
-safeivdep(::Type{Adjoint{T,Array{T,N}}}) where {T <: Union{Bool,Base.HWNumber}, N} = true
-safeivdep(::Type{Transpose{T,Array{T,N}}}) where {T <: Union{Bool,Base.HWNumber}, N} = true
-safeivdep(::Type{<:SubArray{T,N,Array{T,M}}}) where {T <: Union{Bool,Base.HWNumber}, N, M} = true
-safeivdep(::Type{<:AbstractStrideArray{<:Any,<:Any,T}}) where {T <: Union{Bool,Base.HWNumber}} = true
+fast_materialize!(_, __, dest, x::Number) = fill!(dest, x)
+fast_materialize!(_, __, dest, x::AbstractArray) =
+    length(x) == 1 ? fill!(dest, x) : copyto!(dest, x)
 
 mutable struct BroadcastCharacteristics
     loopheader::Expr
     arrays::Vector{Symbol}
     maybelinear::Bool
-    maybeivdep::Bool
 end
-BroadcastCharacteristics() = BroadcastCharacteristics(Expr(:block), Symbol[], true, true)
+BroadcastCharacteristics() = BroadcastCharacteristics(Expr(:block), Symbol[], true)
 
 _tuplelen(::Type{T}) where {N,T<:Tuple{Vararg{Any,N}}} = N
 
 function walk_bc!(
-        bcc::BroadcastCharacteristics, loopbody_lin, loopbody_car, loopbody_slow,
-        ii, bc::Type{<:Broadcasted}, bcsym, ax::Type{<:Tuple}, axsym
-       )
+    bcc::BroadcastCharacteristics,
+    loopbody_lin,
+    loopbody_car,
+    loopbody_slow,
+    ii,
+    bc::Type{<:Broadcasted},
+    bcsym,
+    ax::Type{<:Tuple},
+    axsym,
+)
     f = gensym(:f)
     push!(bcc.loopheader.args, :($f = $bcsym.f))
     new_loopbody_lin = Expr(:call, f)
     new_loopbody_car = Expr(:call, f)
     new_loopbody_slow = Expr(:call, f)
     args = getArgs(bc)
-    axs  = getAxes(ax)
+    axs = getAxes(ax)
     push!(loopbody_lin.args, new_loopbody_lin)
     push!(loopbody_car.args, new_loopbody_car)
     push!(loopbody_slow.args, new_loopbody_slow)
     for (i, arg) in enumerate(args)
         if arg <: Broadcasted
-            new_bcsym = gensym(:bcsym); new_axsym = gensym(:axsym);
+            new_bcsym = gensym(:bcsym)
+            new_axsym = gensym(:axsym)
             push!(bcc.loopheader.args, :($new_bcsym = $bcsym.args[$i]))
             push!(bcc.loopheader.args, :($new_axsym = $axsym[$i]))
-            walk_bc!(bcc, new_loopbody_lin, new_loopbody_car, new_loopbody_slow, ii, arg, new_bcsym, axs[i], new_axsym)
+            walk_bc!(
+                bcc,
+                new_loopbody_lin,
+                new_loopbody_car,
+                new_loopbody_slow,
+                ii,
+                arg,
+                new_bcsym,
+                axs[i],
+                new_axsym,
+            )
         else
             new_arg = gensym(:x)
             push!(bcc.loopheader.args, :($new_arg = $bcsym.args[$i]))
             nd::Int = length(ii)
-            if (arg <: Adjoint{<:Any,<:AbstractVector}) || (arg <: Transpose{<:Any,<:AbstractVector}) ||
-                (arg <: SubArray{<:Any, 2, <:Adjoint{<:Any, <:AbstractVector}, <:Tuple{Base.Slice{Base.OneTo{Int}}, <:AbstractVector}}) ||
-                (arg <: SubArray{<:Any, 2, <:Transpose{<:Any, <:AbstractVector}, <:Tuple{Base.Slice{Base.OneTo{Int}}, <:AbstractVector}})
-                push!(bcc.arrays, new_arg)
-                bcc.maybelinear = false
-                push!(bcc.loopheader.args, :(isfast &= axes($new_arg,2) == dstaxis_2))
-                index = :($new_arg[1, $(ii[2])])
-                slowindex = :(broadcastgetindex($new_arg, 1, $(ii[2])))
-                push!(new_loopbody_car.args, index)
-                push!(new_loopbody_slow.args, slowindex)
-            elseif arg <: Tuple
+            if arg <: Tuple
                 tuple_length = _tuplelen(arg)
                 if tuple_length == 1
-                  scalar = gensym(:scalar)
-                  push!(bcc.loopheader.args, :($scalar = $new_arg[1]))
-                  push!(new_loopbody_lin.args, scalar)
-                  push!(new_loopbody_car.args, scalar)
-                  push!(new_loopbody_slow.args, scalar)
+                    scalar = gensym(:scalar)
+                    push!(bcc.loopheader.args, :($scalar = $new_arg[1]))
+                    push!(new_loopbody_lin.args, scalar)
+                    push!(new_loopbody_car.args, scalar)
+                    push!(new_loopbody_slow.args, scalar)
                 else
-                  bcc.maybelinear &= nd == 1
-                  push!(bcc.loopheader.args, :(isfast &= Base.OneTo($tuple_length) == dstaxis_1))
-                  push!(new_loopbody_lin.args, :($new_arg[i]))
-                  push!(new_loopbody_car.args, :($new_arg[i1]))
-                  push!(new_loopbody_slow.args, :($new_arg[i1]))
+                    bcc.maybelinear &= nd == 1
+                    push!(
+                        bcc.loopheader.args,
+                        :(isfast &= Base.OneTo($tuple_length) == dstaxis_1),
+                    )
+                    push!(new_loopbody_lin.args, :($new_arg[i]))
+                    push!(new_loopbody_car.args, :($new_arg[i1]))
+                    push!(new_loopbody_slow.args, :($new_arg[i1]))
                 end
             else
                 new_nd::Int = _tuplelen(axs[i]) # ndims on `arg` won't work because of possible world age errors.
@@ -173,16 +215,39 @@ function walk_bc!(
                 else
                     push!(bcc.arrays, new_arg)
                     bcc.maybelinear &= (nd == new_nd)
-                    bcc.maybeivdep = bcc.maybeivdep && safeivdep(arg)
                     new_arg_axes = Symbol(new_arg, "#axes#")
                     push!(bcc.loopheader.args, :($new_arg_axes = $axsym[$i]))
-                    push!(bcc.loopheader.args, :((Base.Cartesian.@ntuple $new_nd $new_arg_axes) = $new_arg_axes))
+                    push!(
+                        bcc.loopheader.args,
+                        :((Base.Cartesian.@ntuple $new_nd $new_arg_axes) = $new_arg_axes),
+                    )
+                    newarg_cartesian_index = Expr(:ref, new_arg)
+                    newarg_slow_index = Expr(:call, broadcastgetindex, new_arg)
                     for n ∈ 1:new_nd
-                        push!(bcc.loopheader.args, :(isfast &= $(Symbol(new_arg_axes,'_',n)) == $(Symbol(:dstaxis_,n))))
+                        kl = known_length(axs[i].parameters[n])
+                        if kl === 1
+                            bcc.maybelinear = false
+                            push!(newarg_cartesian_index.args, 1)
+                            push!(newarg_slow_index.args, 1)
+                        else
+                            push!(
+                                bcc.loopheader.args,
+                                :(
+                                    isfast &=
+                                        $(Symbol(new_arg_axes, '_', n)) ==
+                                        $(Symbol(:dstaxis_, n))
+                                ),
+                            )
+                            push!(newarg_cartesian_index.args, ii[n])
+                            push!(newarg_slow_index.args, ii[n])
+                        end
                     end
                     push!(new_loopbody_lin.args, :($new_arg[i]))
-                    push!(new_loopbody_car.args, :($new_arg[$(ii[1:new_nd]...)]))
-                    push!(new_loopbody_slow.args, :(broadcastgetindex($new_arg, $(ii[1:new_nd]...))))
+                    push!(new_loopbody_car.args, newarg_cartesian_index)
+                    push!(
+                        new_loopbody_slow.args,
+                        :(broadcastgetindex($new_arg, $(ii[1:new_nd]...))),
+                    )
                 end
             end
         end
@@ -200,7 +265,12 @@ function pushsymname!(ex::Expr, base::Symbol, @nospecialize(arg))
     end
 end
 function _goto(base::Symbol, i::Int, sym::Symbol)
-  Expr(:macrocall, sym, LineNumberNode(@__LINE__,Symbol(@__FILE__)), Symbol(base, "#label#", i))
+    Expr(
+        :macrocall,
+        sym,
+        LineNumberNode(@__LINE__, Symbol(@__FILE__)),
+        Symbol(base, "#label#", i),
+    )
 end
 goto(base::Symbol, i::Int) = _goto(base, i, Symbol("@goto"))
 label(base::Symbol, i::Int) = _goto(base, i, Symbol("@label"))
@@ -298,59 +368,89 @@ macro (..)(kwarg0, kwarg1, ex)
 end
 
 const DEBUG = Ref(false)
-@generated function fast_materialize!(dst, ::DB, bc::Broadcasted, dstaxes::Tuple{Vararg{Any,N}}, ax, indexstyle) where {N,DB}
+@generated function _fast_materialize!(
+    dst,
+    ::Val{NOALIAS},
+    ::DB,
+    bc::Broadcasted,
+    dstaxes::Tuple{Vararg{Any,N}},
+    ax,
+    indexstyle,
+) where {N,DB,NOALIAS}
     loopbody_lin = :($setindex!(dst))
     loopbody_car = :($setindex!(dst))
     loopbody_slow = :($setindex!(dst))
     bcc = BroadcastCharacteristics()
-    ii = map(i->Symbol(:i_, i), 1:N)
-    walk_bc!(
-        bcc, loopbody_lin, loopbody_car, loopbody_slow,
-        ii, bc, :bc, ax, :ax
-       )
+    ii = map(Base.Fix1(Symbol, :i_), 1:N)
+    walk_bc!(bcc, loopbody_lin, loopbody_car, loopbody_slow, ii, bc, :bc, ax, :ax)
     push!(loopbody_lin.args, :i)
     append!(loopbody_car.args, ii)
     append!(loopbody_slow.args, ii)
-    loop_quote = if !(bcc.maybelinear && (indexstyle === IndexLinear))
-        :(@inbounds Base.Cartesian.@nloops $N i dst begin
-            $loopbody_car
-        end)
-    elseif bcc.maybeivdep
-        :(@inbounds @simd ivdep for i in $eachindex(dst)
-            $loopbody_lin
-        end)
+    loop_quote = if N > 1 && !(bcc.maybelinear && (indexstyle === IndexLinear))
+        loop = if NOALIAS
+            quote
+                @simd ivdep for i_1 in axes(dst, 1)
+                    $loopbody_car
+                end
+            end
+        else
+            quote
+                @simd for i_1 in axes(dst, 1)
+                    $loopbody_car
+                end
+            end
+        end
+        for n = N:-1:2
+            loop = quote
+                for $(ii[n]) in axes(dst, $n)
+                    $loop
+                end
+            end
+        end
+        loop
+    elseif NOALIAS
+        quote
+            @simd ivdep for i in $eachindex(dst)
+                $loopbody_lin
+            end
+        end
     else
-        :(@inbounds @simd for i in $eachindex(dst)
-            $loopbody_lin
-        end)
+        quote
+            @simd for i in $eachindex(dst)
+                $loopbody_lin
+            end
+        end
     end
     q = quote
-        $(Expr(:meta,:inline))
+        $(Expr(:meta, :inline))
         isfast = true
         (Base.Cartesian.@ntuple $N dstaxis) = dstaxes
         $(bcc.loopheader)
     end
     if DB === False
         if DEBUG[]
-            push!(q.args, :(if isfast
-                $loop_quote
-            else
-                throw(ArgumentError("AHHH!"))
-            end))
+            push!(q.args, quote
+                if isfast
+                    @inbounds $loop_quote
+                else
+                    throw(ArgumentError("AHHH!"))
+                end
+            end)
         else
-            push!(q.args, loop_quote)
+            push!(q.args, :(@inbounds $loop_quote))
         end
     else
-        push!(q.args, :(if isfast
-            $loop_quote
-        else
-            Base.Cartesian.@nloops $N i dst begin
-                $loopbody_slow
+        push!(q.args, quote
+            if isfast
+                @inbounds $loop_quote
+            else
+                Base.Cartesian.@nloops $N i dst begin
+                    $loopbody_slow
+                end
             end
-        end))
+        end)
     end
     push!(q.args, :dst)
     return q
 end
-
 end
