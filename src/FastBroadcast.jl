@@ -429,13 +429,20 @@ const DEBUG = Ref(false)
     end
     if DB === False
         if DEBUG[]
-            push!(q.args, quote
-                if isfast
-                    @inbounds $loop_quote
-                else
-                    throw(ArgumentError("AHHH!"))
-                end
-            end)
+            push!(
+                q.args,
+                quote
+                    if isfast
+                        @inbounds $loop_quote
+                    else
+                        throw(
+                            ArgumentError(
+                                "Could not avoid broadcasting, because an axis had runtime size=1. Axes types were: $(ax).",
+                            ),
+                        )
+                    end
+                end,
+            )
         else
             push!(q.args, :(@inbounds $loop_quote))
         end
