@@ -3,7 +3,7 @@ module FastBroadcast
 export @..
 
 using ArrayInterfaceCore: indices_do_not_alias
-using ArrayInterface: known_length
+using ArrayInterface: axes, known_length
 using Base.Broadcast: Broadcasted
 using LinearAlgebra: Adjoint, Transpose
 using Static, Polyester
@@ -389,20 +389,20 @@ const DEBUG = Ref(false)
     loop_quote = if N > 1 && !(bcc.maybelinear && (indexstyle === IndexLinear))
         loop = if NOALIAS
             quote
-                @simd ivdep for i_1 in axes(dst, 1)
+                @simd ivdep for i_1 in $axes(dst, 1)
                     $loopbody_car
                 end
             end
         else
             quote
-                @simd for i_1 in axes(dst, 1)
+                @simd for i_1 in $axes(dst, 1)
                     $loopbody_car
                 end
             end
         end
         for n = N:-1:2
             loop = quote
-                for $(ii[n]) in axes(dst, $n)
+                for $(ii[n]) in $axes(dst, $n)
                     $loop
                 end
             end
@@ -437,7 +437,7 @@ const DEBUG = Ref(false)
                     else
                         throw(
                             ArgumentError(
-                                "Could not avoid broadcasting, because an axis had runtime size=1. Axes types were: $(ax).",
+                                "Could not avoid broadcasting, because an axis had runtime size=1. Axes were: $(ax).",
                             ),
                         )
                     end
