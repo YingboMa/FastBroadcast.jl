@@ -146,14 +146,14 @@ _tuplelen(::Type{T}) where {N,T<:Tuple{Vararg{Any,N}}} = N
 
 function walk_bc!(
     bcc::BroadcastCharacteristics,
-    loopbody_lin,
-    loopbody_car,
-    loopbody_slow,
-    ii,
-    bc::Type{<:Broadcasted},
-    bcsym,
-    ax::Type{<:Tuple},
-    axsym,
+    loopbody_lin::Expr,
+    loopbody_car::Expr,
+    loopbody_slow::Expr,
+    ii::Vector{Symbol},
+    @nospecialize(bc::Type{<:Broadcasted}),
+    bcsym::Symbol,
+    @nospecialize(ax::Type{<:Tuple}),
+    axsym::Symbol,
 )
     f = gensym(:f)
     push!(bcc.loopheader.args, :($f = $bcsym.f))
