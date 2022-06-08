@@ -336,7 +336,7 @@ function fb_macro(ex, mod, threadarg, broadcastarg)
 end
 
 macro (..)(ex)
-    fb_macro(ex, __module__, False(), True())
+    fb_macro(ex, __module__, False(), False())
 end
 
 function __process_kwarg(kwarg)
@@ -349,7 +349,7 @@ function _validate_kwarg(kwarg)
     @assert (argname === :thread) || (argname === :broadcast)
     argname === :thread
 end
-function _process_kwarg(kwarg, threadarg = False(), broadcastarg = True())
+function _process_kwarg(kwarg, threadarg = False(), broadcastarg = False())
     if _validate_kwarg(kwarg)
         return __process_kwarg(kwarg), broadcastarg
     else
