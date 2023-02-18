@@ -12,8 +12,8 @@ Static = "aedffcd0-7271-4cad-89d0-dc628f76c6d3"
 StrideArraysCore = "7792a7ef-975c-4747-a70f-980b88e8d1da"
 
 [compat]
-ArrayInterface = "7"
-StaticArrayInterface = "0.1.9"
+ArrayInterface = "6, 7"
+StaticArrayInterface = "1"
 Polyester = "0.5, 0.6, 0.7"
 Static = "0.3, 0.4, 0.5, 0.6, 0.7, 0.8"
 StrideArraysCore = "0.3, 0.4"
