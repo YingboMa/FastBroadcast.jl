@@ -2,8 +2,8 @@ module FastBroadcast
 
 export @..
 
-using ArrayInterfaceCore: indices_do_not_alias
-using ArrayInterface: axes, known_length
+using StaticArrayInterface: axes, known_length
+using ArrayInterface: indices_do_not_alias
 using Base.Broadcast: Broadcasted
 using LinearAlgebra: Adjoint, Transpose
 using Static, Polyester
