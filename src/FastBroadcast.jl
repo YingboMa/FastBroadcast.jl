@@ -2,7 +2,7 @@ module FastBroadcast
 
 export @..
 
-using StaticArrayInterface: axes, known_length
+using StaticArrayInterface: static_axes, known_length
 using ArrayInterface: indices_do_not_alias
 using Base.Broadcast: Broadcasted
 using LinearAlgebra: Adjoint, Transpose
@@ -39,7 +39,7 @@ end
             Val(indices_do_not_alias(A)),
             DB(),
             bc,
-            axes(dst),
+            static_axes(dst),
             _get_axes(bc),
             _index_style(bc),
         )
@@ -71,7 +71,7 @@ _view(t::Tuple{Vararg{AbstractRange,N}}, r, ::Val{N}) where {N} = (Base.front(t)
 
 function fast_materialize!(::True, ::DB, dst, bc::Broadcasted{S}) where {S,DB}
     if use_fast_broadcast(S)
-        fast_materialize_threaded!(dst, DB(), bc, axes(dst))
+        fast_materialize_threaded!(dst, DB(), bc, static_axes(dst))
     else
         Base.Broadcast.materialize!(dst, bc)
     end
@@ -101,7 +101,7 @@ function fast_materialize_threaded!(
 end
 
 
-@inline _get_axes(x) = axes(x)
+@inline _get_axes(x) = static_axes(x)
 @inline _get_axes(bc::Broadcasted) = map(_get_axes, bc.args)
 @inline __index_style(_) = Val{false}()
 @inline __index_style(::IndexLinear) = Val{true}()
@@ -345,7 +345,7 @@ It additionally provides two optional keyword arguments:
 - broadcast: Defaults to `false`. If `true`, it will broadcast axes with dynamic
     runtime sizes of `1` to larger sizes, if `false` only sizes known to be `1`
     at compile time will be supported, i.e. axes such that
-    `ArrayInterface.known_length(typeof(ArrayInterface.axes(x,i))) == 1` will
+    `ArrayInterface.known_length(typeof(StaticArrayInterface.static_axes(x,i))) == 1` will
     be broadcast. Note that this differs from base broadcasting, in that
     base broadcasting only supports `broadcast=true`.
 """
@@ -403,20 +403,20 @@ const DEBUG = Ref(false)
     loop_quote = if N > 1 && !(bcc.maybelinear && (indexstyle === IndexLinear))
         loop = if NOALIAS
             quote
-                @simd ivdep for i_1 in $axes(dst, 1)
+                @simd ivdep for i_1 in $static_axes(dst, 1)
                     $loopbody_car
                 end
             end
         else
             quote
-                @simd for i_1 in $axes(dst, 1)
+                @simd for i_1 in $static_axes(dst, 1)
                     $loopbody_car
                 end
             end
         end
         for n = N:-1:2
             loop = quote
-                for $(ii[n]) in $axes(dst, $n)
+                for $(ii[n]) in $static_axes(dst, $n)
                     $loop
                 end
             end
