@@ -1,7 +1,7 @@
 name = "FastBroadcast"
 uuid = "7034ab61-46d4-4ed7-9d0f-46aef9175898"
 authors = ["Yingbo Ma <mayingbo5@gmail.com> and Chris Elrod <elrodc@gmail.com>"]
-version = "0.2.4"
+version = "0.2.5"
 
 [deps]
 ArrayInterface = "4fba245c-0d91-5ea0-9b3e-6abc04ee57a9"
