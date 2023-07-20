@@ -56,14 +56,14 @@ __view(t::Tuple{T}, r, ::Val{N}) where {T,N} = (_view(first(t), r, Val(N)),)
 __view(t::Tuple{T,Vararg}, r, ::Val{N}) where {T,N} =
     (_view(first(t), r, Val(N)), __view(Base.tail(t), r, Val(N))...)
 function _view(
-    bc::Base.Broadcast.Broadcasted{Base.Broadcast.DefaultArrayStyle{N},Nothing},
+    bc::Base.Broadcast.Broadcasted{<:Base.Broadcast.AbstractArrayStyle{N},Nothing},
     r,
     ::Val{N},
 ) where {N}
-    Base.Broadcast.Broadcasted(bc.f, __view(bc.args, r, Val(N)), Val(N))
+    Base.Broadcast.Broadcasted(bc.f, __view(bc.args, r, Val(N)))
 end
 _view(
-    bc::Base.Broadcast.Broadcasted{<:Base.Broadcast.DefaultArrayStyle},
+    bc::Base.Broadcast.Broadcasted{<:Base.Broadcast.AbstractArrayStyle},
     r,
     ::Val{N},
 ) where {N} = bc
