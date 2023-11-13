@@ -275,13 +275,53 @@ end
 goto(base::Symbol, i::Int) = _goto(base, i, Symbol("@goto"))
 label(base::Symbol, i::Int) = _goto(base, i, Symbol("@label"))
 
-function add_gotoifnot!(q::Expr, gotos::Vector{Int}, base::Symbol, cond, dest::Int)
+function gotoifnot_stmt(base::Symbol, @nospecialize(cond), dest::Int)
     ex = Expr(:||)
     pushsymname!(ex, base, cond)
     push!(ex.args, goto(base, dest))
-    push!(q.args, ex)
-    push!(gotos, dest)
-    nothing
+    return ex
+end
+
+function broadcast_stmt!(gotos::Vector{Int}, base::Symbol, i::Int,
+                         threadarg, broadcastarg, @nospecialize code)
+    if Meta.isexpr(code, :call)
+        ex = Expr(:call)
+        f = code.args[1]
+        if f === GlobalRef(Base, :materialize)
+            push!(ex.args, fast_materialize, threadarg, broadcastarg)
+        elseif f === GlobalRef(Base, :materialize!)
+            push!(ex.args, fast_materialize!, threadarg, broadcastarg)
+        elseif f === GlobalRef(Base, :getindex)
+            push!(ex.args, Base.Broadcast.dotview)
+        else
+            pushsymname!(ex, base, f)
+        end
+        for arg ∈ @view(code.args[2:end])
+            pushsymname!(ex, base, arg)
+        end
+        return Expr(:(=), Symbol(base, '_', i), ex)
+    elseif Meta.isexpr(code, :(=))
+        ex = Expr(:(=), Symbol(base, 's', code.args[1].id))
+        rhs = broadcast_stmt!(gotos, base, i, threadarg, broadcastarg, code.args[2])
+        pushsymname!(ex, base, rhs)
+        return ex
+    elseif VERSION ≥ v"1.6" && code isa Core.GotoIfNot
+        push!(gotos, code.dest)
+        return gotoifnot_stmt(base, code.cond, code.dest)
+    elseif VERSION < v"1.6" && Meta.isexpr(code, :gotoifnot)
+        cond, dest = code.args
+        push!(gotos, dest)
+        return gotoifnot_stmt(base, cond, dest)
+    elseif code isa Core.GotoNode
+        push!(gotos, code.label)
+        ex = goto(base, code.label)
+        return ex
+    elseif !(VERSION ≥ v"1.6" ? isa(code, Core.ReturnNode) : Meta.isexpr(code, :return))
+        ex = Expr(:(=), Symbol(base, '_', i))
+        pushsymname!(ex, base, code)
+        return ex
+    end
+    return nothing
 end
 
 function broadcast_codeinfo(ci, threadarg, broadcastarg)
@@ -293,36 +333,8 @@ function broadcast_codeinfo(ci, threadarg, broadcastarg)
         if k ≢ nothing
             push!(q.args, label(base, i))
         end
-        if Meta.isexpr(code, :call)
-            ex = Expr(:call)
-            f = code.args[1]
-            if f === GlobalRef(Base, :materialize)
-                push!(ex.args, fast_materialize, threadarg, broadcastarg)
-            elseif f === GlobalRef(Base, :materialize!)
-                push!(ex.args, fast_materialize!, threadarg, broadcastarg)
-            elseif f === GlobalRef(Base, :getindex)
-                push!(ex.args, Base.Broadcast.dotview)
-            else
-                pushsymname!(ex, base, f)
-            end
-            for arg ∈ @view(code.args[2:end])
-                pushsymname!(ex, base, arg)
-            end
-            push!(q.args, Expr(:(=), Symbol(base, '_', i), ex))
-        elseif Meta.isexpr(code, :(=))
-            ex = Expr(:(=), Symbol(base, 's', code.args[1].id))
-            pushsymname!(ex, base, code.args[2])
-            push!(q.args, ex)
-        elseif VERSION ≥ v"1.6" && code isa Core.GotoIfNot
-            add_gotoifnot!(q, gotos, base, code.cond, code.dest)
-        elseif VERSION < v"1.6" && Meta.isexpr(code, :gotoifnot)
-            add_gotoifnot!(q, gotos, base, code.args[1], code.args[2])
-        elseif code isa Core.GotoNode
-            push!(q.args, goto(base, code.label))
-            push!(gotos, code.label)
-        elseif !(VERSION ≥ v"1.6" ? isa(code, Core.ReturnNode) : Meta.isexpr(code, :return))
-            ex = Expr(:(=), Symbol(base, '_', i))
-            pushsymname!(ex, base, code)
+        ex = broadcast_stmt!(gotos, base, i, threadarg, broadcastarg, code)
+        if ex !== nothing
             push!(q.args, ex)
         end
     end
