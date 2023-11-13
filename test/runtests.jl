@@ -118,6 +118,10 @@ if GROUP == "All" || GROUP == "Core"
             @test_throws ArgumentError @.. broadcast = false A * [1.0]
         end
         @test FastBroadcast.indices_do_not_alias(typeof(view(fill(0, 10), 1:4)))
+
+        let ex = macroexpand(@__MODULE__, :(@.. broadcast=false @view(J[idxs])=@view(J[idxs]) - inv_alpha))
+            @test Base.Meta.isexpr(ex, :block)
+        end
     end
 
     VERSION >= v"1.6" && PerformanceTestTools.@include("vectorization_tests.jl")
