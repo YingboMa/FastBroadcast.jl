@@ -165,19 +165,14 @@ end
   return dst
 end
 
-@inline function _fast_materialize!(dst::AbstractArray{<:Any,N}, ::Val{NOALIAS}, ::False, bc::Broadcasted) where {N,NOALIAS}
+@inline function _fast_materialize!(dst, ::Val{NOALIAS}, ::False, bc::Broadcasted) where {NOALIAS}
   _no_dyn_broadcast, _islinear = _static_checkaxes(bc, static_axes(dst))
   @boundscheck _no_dyn_broadcast || throw(ArgumentError("Some axes are not equal, or feature a dynamic broadcast!"))
   __fast_materialize!(dst, Val(NOALIAS), bc, _islinear)
   return dst
 end
 
-@inline function _fast_materialize!(
-  dst,
-  ::Val{NOALIAS},
-  ::True,
-  bc::Broadcasted,
-) where {NOALIAS}
+@inline function _fast_materialize!(dst, ::Val{NOALIAS}, ::True, bc::Broadcasted) where {NOALIAS}
   _no_dyn_broadcast, _islinear = _static_checkaxes(bc, static_axes(dst))
   _no_dyn_broadcast && return __fast_materialize!(dst, Val(NOALIAS), bc, _islinear)
   @boundscheck _checkaxes(bc, static_axes(dst)) || throw(ArgumentError("Size mismatch."))
