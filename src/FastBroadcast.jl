@@ -35,9 +35,10 @@ end
 @inline _fastindex(b::Base.RefValue, _) = b[]
 @inline _fastindex(b::Tuple{X,Y,Vararg}, i) where {X,Y} = @inbounds b[i]
 @inline _fastindex(b::Broadcasted, i) = b.f(_rmap(Fix{2}(_fastindex, i), b.args)...)
-@inline _fastindex(A::AbstractArray, i::Int) = @inbounds A[i]
-@inline function _fastindex(A::AbstractArray{<:Any,M}, i::CartesianIndex{N}) where {M,N}
-  inds = _rmap(static_axes(A), to_tup(Val(M), i)) do ax, j
+@inline function _fastindex(A, i)
+  i isa Int && return @inbounds A[i]
+  axs = static_axes(A)
+  inds = _rmap(axs, to_tup(Val(length(axs)), i)) do ax, j
     Bool(_static_one(static_length(ax))) ? 1 : j
   end
   @inbounds A[inds...]
@@ -49,10 +50,10 @@ end
 @inline _slowindex(b::Base.RefValue, _) = b[]
 @inline _slowindex(b::Tuple{X,Y,Vararg}, i) where {X,Y} = @inbounds b[i]
 @inline _slowindex(b::Broadcasted, i) = b.f(_rmap(Fix{2}(_slowindex, i), b.args)...)
-@inline _slowindex(A::AbstractArray, i::Int) = @inbounds A[i]
-@inline function _slowindex(A::AbstractArray{<:Any,M}, i::CartesianIndex{N}) where {M,N}
-  inds = to_tup(Val(M), i)
-  @inbounds A[_rmap(ifelse, _rmap(isone, size(A)), _rmap(first, axes(A)), inds)...]
+@inline function _slowindex(A, i)
+  i isa Int && return @inbounds A[i]
+  axs = static_axes(A)
+  @inbounds A[_rmap(ifelse, _rmap(isone, size(A)), _rmap(first, axs), to_tup(Val(length(axs)), i))...]
 end
 
 @inline _all(_, x::Tuple{}) = True()
