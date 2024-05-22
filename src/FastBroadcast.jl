@@ -106,13 +106,6 @@ end
   _rall(eqs)
 end
 
-@inline function _static_not_flat(B::AbstractArray, ::Val{N}) where {N}
-  (IndexStyle(typeof(B)) === IndexLinear()) && ndims(B) == N ? _any_one(static_axes(B)) : True()
-end
-@inline function _static_not_flat(bc::Broadcasted, VN::Val)
-  _any(Fix{2}(_static_not_flat, VN), bc.args)
-end
-
 @inline _checkaxes(::Union{Number,Base.RefValue}, _) = true
 @inline function _checkaxes(::Tuple{Vararg{Any,M}}, ax) where {M}
   M == 1 || M == length(first(ax))
@@ -129,7 +122,8 @@ end
   M == 1 || M == length(first(ax)), N == 1 ? False() : True()
 end
 @inline function _static_checkaxes(B, ax::Tuple{Vararg{Any,N}}) where {N}
-  _static_match(static_axes(B), ax), _static_not_flat(B, Val(N))
+  bx = static_axes(B)
+  _static_match(bx, ax), (IndexStyle(typeof(B)) === IndexLinear()) && length(bx) == N ? _any_one(bx) : True()
 end
 @inline function _static_checkaxes(bc::Broadcasted, ax::Tuple{Vararg{Any,N}}) where {N}
   tups = _rmap(Fix{2}(_static_checkaxes, ax), bc.args)
@@ -407,7 +401,7 @@ end
 
 let # we could check `hasfield(Method, :recursion_relation)`, but I'd rather see an error if things change
   dont_limit = Returns(true)
-  for f in (_fastindex, _slowindex, _static_not_flat, _checkaxes, _static_checkaxes, __any, _any, __all, _all, _rall, _rmap, __view, _view)
+  for f in (_fastindex, _slowindex, _checkaxes, _static_checkaxes, __any, _any, __all, _all, _rall, _rmap, __view, _view)
     for m in methods(f)
       m.recursion_relation = dont_limit
     end
