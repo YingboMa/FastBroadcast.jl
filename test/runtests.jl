@@ -2,8 +2,6 @@ using FastBroadcast
 using SparseArrays
 using PerformanceTestTools, Test
 
-FastBroadcast.DEBUG[] = true
-
 const GROUP = get(ENV, "GROUP", "All")
 
 function activate_downstream_env()
