@@ -1,7 +1,7 @@
 module FastBroadcast
 
 using Core: CodeInfo
-using Base: UV_UNKNOWN
+using Base: UV_UNKNOWN, @propagate_inbounds
 export @..
 
 using StaticArrayInterface: static_axes, static_length
@@ -167,7 +167,7 @@ end
 
 @inline function _fast_materialize!(dst::AbstractArray{<:Any,N}, ::Val{NOALIAS}, ::False, bc::Broadcasted) where {N,NOALIAS}
   _no_dyn_broadcast, _islinear = _static_checkaxes(bc, static_axes(dst))
-  _no_dyn_broadcast || throw(ArgumentError("Some axes are not equal, or feature a dynamic broadcast!"))
+  @boundscheck _no_dyn_broadcast || throw(ArgumentError("Some axes are not equal, or feature a dynamic broadcast!"))
   __fast_materialize!(dst, Val(NOALIAS), bc, _islinear)
   return dst
 end
@@ -180,7 +180,7 @@ end
 ) where {NOALIAS}
   _no_dyn_broadcast, _islinear = _static_checkaxes(bc, static_axes(dst))
   _no_dyn_broadcast && return __fast_materialize!(dst, Val(NOALIAS), bc, _islinear)
-  _checkaxes(bc, static_axes(dst)) || throw(ArgumentError("Size mismatch."))
+  @boundscheck _checkaxes(bc, static_axes(dst)) || throw(ArgumentError("Size mismatch."))
   _slow_materialize!(dst, Val(NOALIAS), bc)
 end
 
@@ -205,14 +205,9 @@ function _slow_materialize!(
   return dst
 end
 
-@inline function fast_materialize(::SB, ::DB, bc::Broadcasted{S}) where {S,SB,DB}
+Base.@propagate_inbounds function fast_materialize(::SB, ::DB, bc::Broadcasted{S}) where {S,SB,DB}
   if use_fast_broadcast(S)
-    fast_materialize!(
-      SB(),
-      DB(),
-      similar(bc, Base.Broadcast.combine_eltypes(bc.f, bc.args)),
-      bc,
-    )
+    fast_materialize!(SB(), DB(), similar(bc, Base.Broadcast.combine_eltypes(bc.f, bc.args)), bc,)
   else
     Base.Broadcast.materialize(bc)
   end
@@ -222,14 +217,9 @@ use_fast_broadcast(::Type{<:Base.Broadcast.DefaultArrayStyle}) = true
 use_fast_broadcast(::Type{<:Base.Broadcast.DefaultArrayStyle{0}}) = false
 
 
-@inline function fast_materialize!(::False, ::DB, dst::A, bc::Broadcasted{S}) where {S,DB,A}
+Base.@propagate_inbounds function fast_materialize!(::False, ::DB, dst::A, bc::Broadcasted{S}) where {S,DB,A}
   if use_fast_broadcast(S)
-    _fast_materialize!(
-      dst,
-      Val(indices_do_not_alias(A)),
-      DB(),
-      bc,
-    )
+    _fast_materialize!(dst, Val(indices_do_not_alias(A)), DB(), bc,)
   else
     Base.Broadcast.materialize!(dst, bc)
   end
@@ -434,7 +424,7 @@ end
 
 let # we could check `hasfield(Method, :recursion_relation)`, but I'd rather see an error if things change
   dont_limit = Returns(true)
-  for f in (_fastindex, _slowindex, _static_not_flat, _checkaxes, _static_checkaxes, _fast_materialize!, __any, _any, __all, _all, _rall, _rmap, __view, _view)
+  for f in (_fastindex, _slowindex, _static_not_flat, _checkaxes, _static_checkaxes, __any, _any, __all, _all, _rall, _rmap, __view, _view)
     for m in methods(f)
       m.recursion_relation = dont_limit
     end
