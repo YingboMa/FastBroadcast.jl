@@ -114,28 +114,24 @@ end
 end
 
 @inline _checkaxes(::Union{Number,Base.RefValue}, _) = true
-@inline function _checkaxes(::Tuple{Vararg{Any,M}}, ax::Tuple{Vararg{Any,N}}) where {M,N}
+@inline function _checkaxes(::Tuple{Vararg{Any,M}}, ax) where {M}
   M == 1 || M == length(first(ax))
 end
-@inline function _checkaxes(B::AbstractArray{<:Any,M}, ax::Tuple{Vararg{Any,N}}) where {M,N}
+@inline function _checkaxes(B, ax)
   _dynamic_match(static_axes(B), ax)
 end
 @inline function _checkaxes(bc::Broadcasted, ax)
   _rall(_rmap(Fix{2}(_checkaxes, ax), bc.args))
 end
 
-@inline _static_checkaxes(::Union{Number,Base.RefValue}, _) = true, False()
+@inline _static_checkaxes(::Union{Number,Base.RefValue}, ::Tuple{Vararg{Any,N}}) where {N} = true, False()
 @inline function _static_checkaxes(::Tuple{Vararg{Any,M}}, ax::Tuple{Vararg{Any,N}}) where {M,N}
-  snf = N == 1 ? False() : True()
-  equal_axes = M == 1 || M == length(first(ax))
-  equal_axes, snf
+  M == 1 || M == length(first(ax)), N == 1 ? False() : True()
 end
-@inline function _static_checkaxes(B::AbstractArray{<:Any,M}, ax::Tuple{Vararg{Any,N}}) where {M,N}
-  snf = _static_not_flat(B, Val(N))
-  equal_axes = _static_match(static_axes(B), ax)
-  equal_axes, snf
+@inline function _static_checkaxes(B, ax::Tuple{Vararg{Any,N}}) where {N}
+  _static_match(static_axes(B), ax), _static_not_flat(B, Val(N))
 end
-@inline function _static_checkaxes(bc::Broadcasted, ax)
+@inline function _static_checkaxes(bc::Broadcasted, ax::Tuple{Vararg{Any,N}}) where {N}
   tups = _rmap(Fix{2}(_static_checkaxes, ax), bc.args)
   _rall(first, tups), _any(last, tups)
 end
