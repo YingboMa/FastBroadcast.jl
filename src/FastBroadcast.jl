@@ -56,16 +56,16 @@ end
   @inbounds A[_rmap(ifelse, _rmap(isone, size(A)), _rmap(first, axs), to_tup(Val(length(axs)), i))...]
 end
 
-@inline _all(_, x::Tuple{}) = True()
+@inline _all(@nospecialize(_), x::Tuple{}) = True()
 @inline _all(f, x::Tuple{X}) where {X} = f(only(x))
-@inline __all(f::F, ::False, x::Tuple) where {F} = False()
+@inline __all(@nospecialize(_), ::False, x::Tuple) = False()
 @inline __all(f::F, ::True, x::Tuple) where {F} = _all(f, x)
 @inline _all(f, x::Tuple{X,Y,Vararg}) where {X,Y} = __all(f, f(first(x)), Base.tail(x))
 @inline _none_one(x) = _all(Fix{2}(Static.ne, Static.One()) ∘ static_length, x)
 
-@inline _any(_, x::Tuple{}) = False()
+@inline _any(@nospecialize(_), x::Tuple{}) = False()
 @inline _any(f, x::Tuple{X}) where {X} = f(only(x))
-@inline __any(f::F, ::True, x::Tuple) where {F} = True()
+@inline __any(@nospecialize(_), ::True, x::Tuple) = True()
 @inline __any(f::F, ::False, x::Tuple) where {F} = _any(f, x)
 @inline _any(f, x::Tuple{X,Y,Vararg}) where {X,Y} = __any(f, f(first(x)), Base.tail(x))
 
@@ -73,20 +73,20 @@ end
 @inline _static_one(::Any) = False()
 @inline _any_one(x) = _any(_static_one ∘ static_length, x)
 
-@inline _rall(_, x::Tuple{}) = true
+@inline _rall(@nospecialize(_), x::Tuple{}) = true
 @inline _rall(f, x::Tuple{X}) where {X} = f(only(x))
 @inline _rall(f, x::Tuple{X,Y,Vararg}) where {X,Y} = f(first(x)) && _rall(f, Base.tail(x))
 @inline _rall(x::Tuple) = _rall(identity, x)
 
-@inline _rmap(_, ::Tuple{}) = ()
+@inline _rmap(@nospecialize(_), ::Tuple{}) = ()
 @inline _rmap(f, x::Tuple{X}) where {X} = (f(only(x)),)
 @inline _rmap(f, x::Tuple{X,Y,Vararg}) where {X,Y} = (f(first(x)), _rmap(f, Base.tail(x))...)
 
-@inline _rmap(_, ::Tuple{}, ::Tuple{}) = ()
+@inline _rmap(@nospecialize(_), ::Tuple{}, ::Tuple{}) = ()
 @inline _rmap(f, a::Tuple{A}, x::Tuple{X}) where {A,X} = (@inline(f(only(a), only(x))),)
 @inline _rmap(f, a::Tuple{A,B,Vararg}, x::Tuple{X,Y,Vararg}) where {A,B,X,Y} = (@inline(f(first(a), first(x))), _rmap(f, Base.tail(a), Base.tail(x))...)
 
-@inline _rmap(_, ::Tuple{}, ::Tuple{}, ::Tuple{}) = ()
+@inline _rmap(@nospecialize(_), ::Tuple{}, ::Tuple{}, ::Tuple{}) = ()
 @inline _rmap(f, a::Tuple{A}, m::Tuple{M}, x::Tuple{X}) where {A,M,X} = (@inline(f(only(a), only(m), only(x))),)
 @inline _rmap(f, a::Tuple{A,B,Vararg}, m::Tuple{M,N,Vararg}, x::Tuple{X,Y,Vararg}) where {A,B,M,N,X,Y} = (@inline(f(first(a), first(m), first(x))), _rmap(f, Base.tail(a), Base.tail(m), Base.tail(x))...)
 
