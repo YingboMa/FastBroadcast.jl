@@ -257,15 +257,7 @@ end
   dstaxes::Tuple{Vararg{Any,N}},
 ) where {N,DB}
   last_dstaxes = dstaxes[N]
-  Polyester.batch(
-    _batch_broadcast_fn,
-    (length(last_dstaxes), Threads.nthreads()),
-    dst,
-    last_dstaxes,
-    bc,
-    Val(N),
-    DB(),
-  )
+  Polyester.batch(_batch_broadcast_fn, (length(last_dstaxes), Threads.nthreads()), dst, last_dstaxes, bc, Val(N), DB())
   return dst
 end
 
