@@ -2,8 +2,6 @@ using FastBroadcast
 using SparseArrays
 using PerformanceTestTools, Test
 
-FastBroadcast.DEBUG[] = true
-
 const GROUP = get(ENV, "GROUP", "All")
 
 function activate_downstream_env()
@@ -22,29 +20,28 @@ if GROUP == "All" || GROUP == "Core"
             FastBroadcast.False(),
             FastBroadcast.True(),
             dst,
-            bc,
+            bc
         ) == bcref
         @test FastBroadcast.fast_materialize!(
             FastBroadcast.False(),
             FastBroadcast.False(),
             dst,
-            bc,
+            bc
         ) == bcref
         dest = similar(bcref)
         @test (@.. dest = (x * y) + x + y + x + y + x + y) == bcref
         @test (@.. (x * y) + x + y + x + y + x + y) == bcref
-        @test (@.. thread = true dest .+= (x * y) + x + y + x + y + x + y) ≈ 2bcref
+        @test (@.. thread=true dest.+=(x * y) + x + y + x + y + x + y) ≈ 2bcref
         @test (@.. dest .-= (x * y) + x + y + x + y + x + y) ≈ bcref
-        @test (@.. thread = true dest *= (x * y) + x + y + x + y + x + y) ≈ abs2.(bcref)
+        @test (@.. thread=true dest*=(x * y) + x + y + x + y + x + y) ≈ abs2.(bcref)
 
-        @test (@.. broadcast = false dest = (x * y) + x + y + x + y + x + y) == bcref
-        @test (@.. broadcast = false (x * y) + x + y + x + y + x + y) == bcref
-        @test (@.. broadcast = false thread = true dest .+=
-            (x * y) + x + y + x + y + x + y) ≈ 2bcref
-        @test (@.. broadcast = false dest .-= (x * y) + x + y + x + y + x + y) ≈ bcref
-        @test (@.. broadcast = false thread = true dest *=
-            (x * y) + x + y + x + y + x + y) ≈ abs2.(bcref)
-
+        @test (@.. broadcast=false dest=(x * y) + x + y + x + y + x + y) == bcref
+        @test (@.. broadcast=false (x*y)+x+y+x+y+x+y) == bcref
+        @test (@.. broadcast=false thread=true dest.+=(x * y) + x + y + x + y + x + y) ≈
+              2bcref
+        @test (@.. broadcast=false dest.-=(x * y) + x + y + x + y + x + y) ≈ bcref
+        @test (@.. broadcast=false thread=true dest*=(x * y) + x + y + x + y + x + y) ≈
+              abs2.(bcref)
 
         nt = (x = x,)
         @test (@.. (nt.x * y) + x + y + x * (3, 4, 5, 6) + y + x * (1,) + y + 3) ≈
@@ -53,8 +50,8 @@ if GROUP == "All" || GROUP == "Core"
         @test (@.. A * y' + x) ≈ (@. A * y' + x)
         @test (@.. A * transpose(y) + x) ≈ (@. A * transpose(y) + x)
         Ashim = A[1:1, :]
-        @test_throws ArgumentError (@.. Ashim * y' + x) ≈ (@. Ashim * y' + x) # test fallback
-        @test (@.. broadcast=true Ashim * y' + x) ≈ (@. Ashim * y' + x) # test fallback
+        @test_throws ArgumentError (@.. Ashim * y' + x)≈(@. Ashim * y' + x) # test fallback
+        @test (@.. broadcast=true Ashim * y'+x) ≈ (@. Ashim * y' + x) # test fallback
         Av = view(A, 1, :)
         @test (@.. Av * y' + A) ≈ (@. Av * y' + A)
         B = similar(A)
@@ -75,7 +72,7 @@ if GROUP == "All" || GROUP == "Core"
         @static if VERSION >= v"1.6"
             var".foo"(a) = a
             @views @.. a = var".foo".(b[1:2]) .+ $abs2(c)
-            @views @.. thread = true a = var".foo".(b[1:2]) .+ $(abs2(c))
+            @views @.. thread=true a=var".foo".(b[1:2]) .+ $(abs2(c))
             @test a == [4, 6]
         else
             a = [4, 6]
@@ -113,14 +110,16 @@ if GROUP == "All" || GROUP == "Core"
             C = similar(A)
             d = rand(N)
             dt = transpose(d)  # could also use permutedims, same problem
-            @.. thread = true broadcast = false C = A * dt
+            @.. thread=true broadcast=false C=A * dt
             @test C ≈ A .* dt
-            @test_throws ArgumentError @.. broadcast = false A * [1.0]
+            @test_throws ArgumentError @.. broadcast=false A*[1.0]
         end
         @test FastBroadcast.indices_do_not_alias(typeof(view(fill(0, 10), 1:4)))
 
-        let ex = macroexpand(@__MODULE__, :(@.. broadcast=false @view(J[idxs])=@view(J[idxs]) - inv_alpha))
-            @test Base.Meta.isexpr(ex, :block)
+        let ex = macroexpand(@__MODULE__,
+                :(@.. broadcast=false @view(J[idxs])=@view(J[idxs]) - inv_alpha))
+            @test Base.Meta.isexpr(ex, :call)
+            @test ex.args[1] === FastBroadcast.fast_materialize!
         end
     end
 
