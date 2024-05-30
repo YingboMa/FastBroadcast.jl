@@ -172,6 +172,11 @@ end
   return dst
 end
 
+# these are needed for `RecursiveArrayTools`'s fast broadcast extension
+use_fast_broadcast(_) = false
+use_fast_broadcast(::Type{<:Base.Broadcast.DefaultArrayStyle}) = true
+use_fast_broadcast(::Type{<:Base.Broadcast.DefaultArrayStyle{0}}) = false
+
 @inline function _fast_materialize!(
   dst, ::Val{NOALIAS}, ::True, bc::Broadcasted) where {NOALIAS}
   sad = static_axes(dst)
@@ -184,18 +189,16 @@ fast_materialize!(_, _, dst, x::Number) = fill!(dst, x)
 fast_materialize!(_, ::False, dst, x::AbstractArray) = copyto!(dst, x)
 function fast_materialize!(_, ::True, dst, x::AbstractArray)
   sad = static_axes(dst)
-  _no_dyn_broadcast, _islinear = _static_checkaxes(x, sad)
+  _no_dyn_broadcast, _ = _static_checkaxes(x, sad)
   _no_dyn_broadcast && return copyto!(dst, x)
   @boundscheck _checkaxes(x, sad) || throw(ArgumentError("Size mismatch."))
-  if dst isa Array
-    for i in CartesianIndices(dst)
-      @inbounds dst[i] = _slowindex(x, i)
-    end
-    return dst
-  else # we want to handle `GPUArray`s, `SparseArrays`, etc
-    return dst .= x
+  (Base.BroadcastStyle(typeof(x)) isa Base.Broadcast.DefaultArrayStyle) || return dst .= x
+  for i in CartesianIndices(dst)
+    @inbounds dst[i] = _slowindex(x, i)
   end
+  return dst
 end
+fast_materialize!(_, _, dst, x) = dst .= x
 
 function _slow_materialize!(
   dst,
@@ -220,20 +223,21 @@ end
 
 Base.@propagate_inbounds function fast_materialize(
   ::SB, ::DB, bc::Broadcasted{S}) where {S,SB,DB}
-  if use_fast_broadcast(S)
-    fast_materialize!(
-      SB(), DB(), similar(bc, Base.Broadcast.combine_eltypes(bc.f, bc.args)), bc)
+  if S === Base.Broadcast.DefaultArrayStyle{0}
+    return _fastindex(bc, 1)
+  elseif S <: Base.Broadcast.DefaultArrayStyle
+    fast_materialize!(SB(), DB(), similar(bc, Base.Broadcast.combine_eltypes(bc.f, bc.args)), bc)
   else
     Base.Broadcast.materialize(bc)
   end
 end
-use_fast_broadcast(_) = false
-use_fast_broadcast(::Type{<:Base.Broadcast.DefaultArrayStyle}) = true
-use_fast_broadcast(::Type{<:Base.Broadcast.DefaultArrayStyle{0}}) = false
+fast_materialize(@nospecialize(_), @nospecialize(_), @nospecialize(x)) = x
 
 Base.@propagate_inbounds function fast_materialize!(
   ::False, ::DB, dst::A, bc::Broadcasted{S}) where {S,DB,A}
-  if use_fast_broadcast(S)
+  if S === Base.Broadcast.DefaultArrayStyle{0}
+    fill!(dst, _fastindex(bc, 1))
+  elseif S <: Base.Broadcast.DefaultArrayStyle
     _fast_materialize!(dst, Val(indices_do_not_alias(A)), DB(), bc)
   else
     Base.Broadcast.materialize!(dst, bc)
@@ -257,7 +261,9 @@ end
   Base.front(t)..., r)
 
 @inline function fast_materialize!(::True, ::DB, dst, bc::Broadcasted{S}) where {S,DB}
-  if use_fast_broadcast(S)
+  if S === Base.Broadcast.DefaultArrayStyle{0}
+    fill!(dst, _fastindex(bc, 1))
+  elseif S <: Base.Broadcast.DefaultArrayStyle
     fast_materialize_threaded!(dst, DB(), bc, static_axes(dst))
   else
     Base.Broadcast.materialize!(dst, bc)
@@ -290,7 +296,12 @@ function _pushfirst_static!(x, b)
   end
 end
 
-@inline _broadcasted(f::F, args...) where {F} = Base.Broadcast.broadcasted(f, args...)
+_dim0(_) = false
+_dim0(::Base.Broadcast.Broadcasted{Base.Broadcast.DefaultArrayStyle{0}}) = true
+@inline function _broadcasted(f::F, args...) where {F}
+  bc = Base.Broadcast.broadcasted(f, args...)
+  _dim0(bc) ? _fastindex(bc, 1) : bc
+end
 @inline _broadcasted(::Colon, arg0, arg1) = arg0:arg1
 @inline _broadcasted(::typeof(Base.maybeview), args...) = begin
   Base.maybeview(args...)
@@ -305,6 +316,10 @@ function _fb_macro!(ex::Expr, threadarg, broadcastarg)
     resize!(ex.args, 1)
     ex.head = :call
     append!(ex.args, args.args)
+  elseif Meta.isexpr(ex, :macrocall, 3) && ex.args[1] === Symbol("@view")
+    ex3 = ex.args[3]
+    ex.head = ex3.head
+    ex.args = ex3.args
   end
   skip = 0
   if Meta.isexpr(ex, :call)
@@ -339,6 +354,12 @@ function _fb_macro!(ex::Expr, threadarg, broadcastarg)
       ex.args = exarg.args
       return
     end
+  elseif Meta.isexpr(ex, :ref)
+    r = Expr(:ref)
+    r.args = ex.args
+    ex.head = :macrocall
+    ex.args = Any[Symbol("@views"), Base.LineNumberNode(@__LINE__, @__FILE__), r]
+    return # `maybeview` doesn't return a `Broadcasted` object
   elseif Meta.isexpr(ex, :let)
     skip = 1
   else
