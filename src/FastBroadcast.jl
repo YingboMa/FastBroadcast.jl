@@ -231,6 +231,7 @@ Base.@propagate_inbounds function fast_materialize(
     Base.Broadcast.materialize(bc)
   end
 end
+fast_materialize(@nospecialize(_), @nospecialize(_), @nospecialize(x)) = x
 
 Base.@propagate_inbounds function fast_materialize!(
   ::False, ::DB, dst::A, bc::Broadcasted{S}) where {S,DB,A}
@@ -295,7 +296,12 @@ function _pushfirst_static!(x, b)
   end
 end
 
-@inline _broadcasted(f::F, args...) where {F} = Base.Broadcast.broadcasted(f, args...)
+_dim0(_) = false
+_dim0(::Base.Broadcast.Broadcasted{Base.Broadcast.DefaultArrayStyle{0}}) = true
+@inline function _broadcasted(f::F, args...) where {F}
+  bc = Base.Broadcast.broadcasted(f, args...)
+  _dim0(bc) ? _fastindex(bc, 1) : bc
+end
 @inline _broadcasted(::Colon, arg0, arg1) = arg0:arg1
 @inline _broadcasted(::typeof(Base.maybeview), args...) = begin
   Base.maybeview(args...)
@@ -310,6 +316,10 @@ function _fb_macro!(ex::Expr, threadarg, broadcastarg)
     resize!(ex.args, 1)
     ex.head = :call
     append!(ex.args, args.args)
+  elseif Meta.isexpr(ex, :macrocall, 3) && ex.args[1] === Symbol("@view")
+    ex3 = ex.args[3]
+    ex.head = ex3.head
+    ex.args = ex3.args
   end
   skip = 0
   if Meta.isexpr(ex, :call)
@@ -344,6 +354,12 @@ function _fb_macro!(ex::Expr, threadarg, broadcastarg)
       ex.args = exarg.args
       return
     end
+  elseif Meta.isexpr(ex, :ref)
+    r = Expr(:ref)
+    r.args = ex.args
+    ex.head = :macrocall
+    ex.args = Any[Symbol("@views"), Base.LineNumberNode(@__LINE__, @__FILE__), r]
+    return # `maybeview` doesn't return a `Broadcasted` object
   elseif Meta.isexpr(ex, :let)
     skip = 1
   else
