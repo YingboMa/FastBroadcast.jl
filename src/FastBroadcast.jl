@@ -174,10 +174,23 @@ end
 
 @inline function _fast_materialize!(
   dst, ::Val{NOALIAS}, ::True, bc::Broadcasted) where {NOALIAS}
-  _no_dyn_broadcast, _islinear = _static_checkaxes(bc, static_axes(dst))
+  sad = static_axes(dst)
+  _no_dyn_broadcast, _islinear = _static_checkaxes(bc, sad)
   _no_dyn_broadcast && return __fast_materialize!(dst, Val(NOALIAS), bc, _islinear)
-  @boundscheck _checkaxes(bc, static_axes(dst)) || throw(ArgumentError("Size mismatch."))
+  @boundscheck _checkaxes(bc, sad) || throw(ArgumentError("Size mismatch."))
   _slow_materialize!(dst, Val(NOALIAS), bc)
+end
+fast_materialize!(_, _, dst, x::Number) = fill!(dst, x)
+fast_materialize!(_, ::False, dst, x::AbstractArray) = copyto!(dst, x)
+function fast_materialize!(_, ::True, dst, x::AbstractArray)
+  sad = static_axes(dst)
+  _no_dyn_broadcast, _islinear = _static_checkaxes(bc, sad)
+  _no_dyn_broadcast && return copyto!(dst, x)
+  @boundscheck _checkaxes(bc, sad) || throw(ArgumentError("Size mismatch."))
+  for i in CartesianIndices(dst)
+    @inbounds dst[i] = _slowindex(x, i)
+  end
+  return dst
 end
 
 function _slow_materialize!(
@@ -262,8 +275,6 @@ end
     dst, last_dstaxes, bc, Val(N), DB())
   return dst
 end
-fast_materialize!(_, _, dst, x::Number) = fill!(dst, x)
-fast_materialize!(_, _, dst, x::AbstractArray) = copyto!(dst, x)
 
 function _pushfirst_static!(x, b)
   if !(b isa Bool)

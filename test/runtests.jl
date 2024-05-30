@@ -85,8 +85,14 @@ if GROUP == "All" || GROUP == "Core"
     @test r == [5, 6, 25, 35]
     @test (@.. r + r[end]) == [40, 41, 60, 70]
 
-    @.. x = y
-    @test x == y
+    let
+      @.. x = y
+      @test x == y
+      z = [y[1]]
+      @.. x = z
+      @test all(==(only(z)), x)
+    end
+
 
     Q = rand(5, 2)
     k = 1
