@@ -172,6 +172,11 @@ end
   return dst
 end
 
+# these are needed for `RecursiveArrayTools`'s fast broadcast extension
+use_fast_broadcast(_) = false
+use_fast_broadcast(::Type{<:Base.Broadcast.DefaultArrayStyle}) = true
+use_fast_broadcast(::Type{<:Base.Broadcast.DefaultArrayStyle{0}}) = false
+
 @inline function _fast_materialize!(
   dst, ::Val{NOALIAS}, ::True, bc::Broadcasted) where {NOALIAS}
   sad = static_axes(dst)
