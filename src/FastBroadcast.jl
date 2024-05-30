@@ -184,13 +184,17 @@ fast_materialize!(_, _, dst, x::Number) = fill!(dst, x)
 fast_materialize!(_, ::False, dst, x::AbstractArray) = copyto!(dst, x)
 function fast_materialize!(_, ::True, dst, x::AbstractArray)
   sad = static_axes(dst)
-  _no_dyn_broadcast, _islinear = _static_checkaxes(bc, sad)
+  _no_dyn_broadcast, _islinear = _static_checkaxes(x, sad)
   _no_dyn_broadcast && return copyto!(dst, x)
-  @boundscheck _checkaxes(bc, sad) || throw(ArgumentError("Size mismatch."))
-  for i in CartesianIndices(dst)
-    @inbounds dst[i] = _slowindex(x, i)
+  @boundscheck _checkaxes(x, sad) || throw(ArgumentError("Size mismatch."))
+  if dst isa Array
+    for i in CartesianIndices(dst)
+      @inbounds dst[i] = _slowindex(x, i)
+    end
+    return dst
+  else # we want to handle `GPUArray`s, `SparseArrays`, etc
+    return dst .= x
   end
-  return dst
 end
 
 function _slow_materialize!(

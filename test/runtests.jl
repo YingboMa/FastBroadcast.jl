@@ -89,7 +89,7 @@ if GROUP == "All" || GROUP == "Core"
       @.. x = y
       @test x == y
       z = [y[1]]
-      @.. x = z
+      @.. broadcast = true x = z
       @test all(==(only(z)), x)
     end
 
@@ -112,6 +112,9 @@ if GROUP == "All" || GROUP == "Core"
       res = @.. x = x + y
       @test res isa SparseVector
       @test res == [3, 4, 0, 12]
+      z = sparse([1])
+      @.. broadcast = true x = z
+      @test all(isone, x)
     end
     let
       N = 4
