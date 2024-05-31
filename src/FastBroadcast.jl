@@ -309,7 +309,7 @@ end
 
 function _fb_macro!(ex::Expr, threadarg, broadcastarg)
   ops = (:(+), :(-), :(*), :(/), :(\), :(÷), :(&),
-    :(|), :(⊻), :(>>), :(>>>), :(<<))
+    :(|), :(⊻), :(>>), :(>>>), :(<<), :(^))
   if Meta.isexpr(ex, :(.)) && length(ex.args) == 2
     args = ex.args[2]
     args isa QuoteNode && return
@@ -330,10 +330,8 @@ function _fb_macro!(ex::Expr, threadarg, broadcastarg)
       return
     end
     pushfirst!(ex.args, _broadcasted)
-    ind = Base.findfirst(
-      ==(ex.args[2]), (Symbol(".+"), Symbol(".-"), Symbol(".*"),
-        Symbol("./"), Symbol(".\\"), Symbol(".÷"), Symbol(".&"),
-        Symbol(".|"), Symbol(".⊻"), Symbol(".>>"), Symbol(".>>>"), Symbol(".<<")))
+    ind = Base.findfirst(==(ex.args[2]), (Symbol(".+"), Symbol(".-"), Symbol(".*"), Symbol("./"), Symbol(".\\"),
+      Symbol(".÷"), Symbol(".&"), Symbol(".|"), Symbol(".⊻"), Symbol(".>>"), Symbol(".>>>"), Symbol(".<<"), Symbol(".^")))
     if ind !== nothing
       ex.args[2] = ops[ind]
     end
@@ -365,7 +363,7 @@ function _fb_macro!(ex::Expr, threadarg, broadcastarg)
   else
     ind = Base.findfirst(
       ==(ex.head), (:(+=), :(-=), :(*=), :(/=), :(\=), :(÷=), :(&=),
-        :(|=), :(⊻=), :(>>=), :(>>>=), :(<<=)))
+        :(|=), :(⊻=), :(>>=), :(>>>=), :(<<=), :(^=)))
     if ind !== nothing
       op = ops[ind]
       # x op= f(args...) -> x = op(x, f(args...))
