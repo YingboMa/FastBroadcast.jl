@@ -355,6 +355,15 @@ end
   Base.maybeview(args...)
 end
 
+function _view!(ex::Expr)
+  r = Expr(:ref)
+  r.args = ex.args
+  ex.head = :macrocall
+  # `maybeview` doesn't return a `Broadcasted` object
+  ex.args = Any[Symbol("@views"), Base.LineNumberNode(@__LINE__, @__FILE__), r]
+  return nothing
+end
+
 function _fb_macro!(ex::Expr, threadarg, broadcastarg)
   ops = (:(+), :(-), :(*), :(/), :(\), :(÷), :(&), :(|), :(⊻), :(>>), :(>>>), :(<<), :(^))
   if Meta.isexpr(ex, :(.)) && length(ex.args) == 2
@@ -405,8 +414,7 @@ function _fb_macro!(ex::Expr, threadarg, broadcastarg)
     pushfirst!(ex.args, fast_materialize!)
     a4 = ex.args[4]
     if Meta.isexpr(a4, :ref)
-      a4.head = :call
-      pushfirst!(a4.args, Base.maybeview)
+      _view!(a4)
       skip = 4
     end
   elseif Meta.isexpr(ex, :($), 1)
@@ -416,11 +424,7 @@ function _fb_macro!(ex::Expr, threadarg, broadcastarg)
       return
     end
   elseif Meta.isexpr(ex, :ref)
-    r = Expr(:ref)
-    r.args = ex.args
-    ex.head = :macrocall
-    ex.args = Any[Symbol("@views"), Base.LineNumberNode(@__LINE__, @__FILE__), r]
-    return # `maybeview` doesn't return a `Broadcasted` object
+    return _view!(ex)
   elseif Meta.isexpr(ex, :let)
     skip = 1
   else

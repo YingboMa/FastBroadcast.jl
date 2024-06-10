@@ -32,10 +32,11 @@ if GROUP == "All" || GROUP == "Core"
     @test (@.. dest = (x * y) + x + y + x + y + x + y) == bcref
     @test (@.. (x * y) + x + y + x + y + x + y) == bcref
     @test (@.. thread = true dest .+= (x * y) + x + y + x + y + x + y) ≈ 2bcref
-    @test (@.. dest .-= (x * y) + x + y + x + y + x + y) ≈ bcref
+    destwrap = [dest]
+    @test (@.. destwrap[end] .-= (x * y) + x + y + x + y + x + y) ≈ bcref
     @test (@.. thread = true dest *= (x * y) + x + y + x + y + x + y) ≈ abs2.(bcref)
 
-    @test (@.. broadcast = false dest = (x * y) + x + y + x + y + x + y) == bcref
+    @test (@.. broadcast = false destwrap[end] = (x * y) + x + y + x + y + x + y) == bcref
     @test (@.. broadcast = false (x * y) + x + y + x + y + x + y) == bcref
     @test (@.. broadcast = false thread = true dest .+= (x * y) + x + y + x + y + x + y) ≈
           2bcref
