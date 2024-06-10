@@ -6,7 +6,7 @@ const GROUP = get(ENV, "GROUP", "All")
 
 function activate_downstream_env()
   Pkg.activate("downstream")
-  Pkg.develop(PackageSpec(path=dirname(@__DIR__)))
+  Pkg.develop(PackageSpec(path = dirname(@__DIR__)))
   Pkg.instantiate()
 end
 
@@ -20,13 +20,13 @@ if GROUP == "All" || GROUP == "Core"
       FastBroadcast.False(),
       FastBroadcast.True(),
       dst,
-      bc
+      bc,
     ) == bcref
     @test FastBroadcast.fast_materialize!(
       FastBroadcast.False(),
       FastBroadcast.False(),
       dst,
-      bc
+      bc,
     ) == bcref
     dest = similar(bcref)
     @test (@.. dest = (x * y) + x + y + x + y + x + y) == bcref
@@ -43,7 +43,7 @@ if GROUP == "All" || GROUP == "Core"
     @test (@.. broadcast = false thread = true dest *= (x * y) + x + y + x + y + x + y) ≈
           abs2.(bcref)
 
-    nt = (x=x,)
+    nt = (x = x,)
     @test (@.. (nt.x * y) + x + y + x * (3, 4, 5, 6) + y + x * (1,) + y + 3) ≈
           (@. (x * y) + x + y + x * (3, 4, 5, 6) + y + nt.x * (1,) + y + 3)
     A = rand(4, 4)
@@ -129,8 +129,10 @@ if GROUP == "All" || GROUP == "Core"
     end
     @test FastBroadcast.indices_do_not_alias(typeof(view(fill(0, 10), 1:4)))
 
-    let ex = macroexpand(@__MODULE__,
-        :(@.. broadcast = false @view(J[idxs]) = @view(J[idxs]) - inv_alpha))
+    let ex = macroexpand(
+        @__MODULE__,
+        :(@.. broadcast = false @view(J[idxs]) = @view(J[idxs]) - inv_alpha),
+      )
       @test Base.Meta.isexpr(ex, :call)
       @test ex.args[1] === FastBroadcast.fast_materialize!
     end
