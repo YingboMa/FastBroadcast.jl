@@ -22,9 +22,11 @@ end
 @inline function to_tup(::Val{M}, i::CartesianIndex{N}) where {M,N}
   if M < N
     ntuple(Fix{1}(getindex, Tuple(i)), Val(M))
-  else
+  elseif M == N
     M == N || error("Array of higher dimension than cartesian index.")
     Tuple(i)
+  else # M > N
+    (Tuple(i)..., ntuple(one, Val(M - N))...)
   end
 end
 
@@ -107,8 +109,10 @@ end
   ax0::Tuple{Vararg{Any,M}},
   ax1::Tuple{Vararg{Any,N}},
 ) where {M,N}
-  subax1 = ntuple(Fix{1}(Base.getindex, ax1), Val(M))
-  eqs = _rmap(ax0, subax1) do x0, x1
+  MN = M < N ? M : N
+  subax0 = ntuple(Fix{1}(Base.getindex, ax0), Val(MN))
+  subax1 = ntuple(Fix{1}(Base.getindex, ax1), Val(MN))
+  eqs = _rmap(subax0, subax1) do x0, x1
     Bool(_static_one(static_length(x0))) || x0 == x1
   end
   _rall(eqs)
@@ -186,7 +190,7 @@ end
 ) where {NOALIAS}
   _no_dyn_broadcast, _islinear = _static_checkaxes(bc, static_axes(dst))
   @boundscheck _no_dyn_broadcast || throw(
-    ArgumentError("Some axes are not equal, or feature a dynamic broadcast!"),
+    DimensionMismatch("Some axes are not equal, or feature a dynamic broadcast!"),
   )
   __fast_materialize!(dst, Val(NOALIAS), bc, _islinear)
   return dst
@@ -206,16 +210,19 @@ use_fast_broadcast(::Type{<:Base.Broadcast.DefaultArrayStyle{0}}) = false
   sad = static_axes(dst)
   _no_dyn_broadcast, _islinear = _static_checkaxes(bc, sad)
   _no_dyn_broadcast && return __fast_materialize!(dst, Val(NOALIAS), bc, _islinear)
-  @boundscheck _checkaxes(bc, sad) || throw(ArgumentError("Size mismatch."))
+  @boundscheck _checkaxes(bc, sad) || throw(DimensionMismatch("Size mismatch."))
   _slow_materialize!(dst, Val(NOALIAS), bc)
 end
 fast_materialize!(_, _, dst, x::Number) = fill!(dst, x)
-fast_materialize!(_, ::False, dst, x::AbstractArray) = copyto!(dst, x)
+function fast_materialize!(_, ::False, dst, x::AbstractArray)
+  Base.Broadcast.check_broadcast_shape(size(dst), size(x))
+  copyto!(dst, x)
+end
 function fast_materialize!(_, ::True, dst, x::AbstractArray)
   sad = static_axes(dst)
   _no_dyn_broadcast, _ = _static_checkaxes(x, sad)
   _no_dyn_broadcast && return copyto!(dst, x)
-  @boundscheck _checkaxes(x, sad) || throw(ArgumentError("Size mismatch."))
+  @boundscheck _checkaxes(x, sad) || throw(DimensionMismatch("Size mismatch."))
   (Base.BroadcastStyle(typeof(x)) isa Base.Broadcast.DefaultArrayStyle) || return dst .= x
   for i in CartesianIndices(dst)
     @inbounds dst[i] = _slowindex(x, i)
