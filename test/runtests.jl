@@ -6,7 +6,7 @@ const GROUP = get(ENV, "GROUP", "All")
 
 function activate_downstream_env()
   Pkg.activate("downstream")
-  Pkg.develop(PackageSpec(path=dirname(@__DIR__)))
+  Pkg.develop(PackageSpec(path = dirname(@__DIR__)))
   Pkg.instantiate()
 end
 
@@ -20,22 +20,23 @@ if GROUP == "All" || GROUP == "Core"
       FastBroadcast.False(),
       FastBroadcast.True(),
       dst,
-      bc
+      bc,
     ) == bcref
     @test FastBroadcast.fast_materialize!(
       FastBroadcast.False(),
       FastBroadcast.False(),
       dst,
-      bc
+      bc,
     ) == bcref
     dest = similar(bcref)
     @test (@.. dest = (x * y) + x + y + x + y + x + y) == bcref
     @test (@.. (x * y) + x + y + x + y + x + y) == bcref
     @test (@.. thread = true dest .+= (x * y) + x + y + x + y + x + y) ≈ 2bcref
-    @test (@.. dest .-= (x * y) + x + y + x + y + x + y) ≈ bcref
+    destwrap = [dest]
+    @test (@.. destwrap[end] .-= (x * y) + x + y + x + y + x + y) ≈ bcref
     @test (@.. thread = true dest *= (x * y) + x + y + x + y + x + y) ≈ abs2.(bcref)
 
-    @test (@.. broadcast = false dest = (x * y) + x + y + x + y + x + y) == bcref
+    @test (@.. broadcast = false destwrap[end] = (x * y) + x + y + x + y + x + y) == bcref
     @test (@.. broadcast = false (x * y) + x + y + x + y + x + y) == bcref
     @test (@.. broadcast = false thread = true dest .+= (x * y) + x + y + x + y + x + y) ≈
           2bcref
@@ -43,14 +44,14 @@ if GROUP == "All" || GROUP == "Core"
     @test (@.. broadcast = false thread = true dest *= (x * y) + x + y + x + y + x + y) ≈
           abs2.(bcref)
 
-    nt = (x=x,)
+    nt = (x = x,)
     @test (@.. (nt.x * y) + x + y + x * (3, 4, 5, 6) + y + x * (1,) + y + 3) ≈
           (@. (x * y) + x + y + x * (3, 4, 5, 6) + y + nt.x * (1,) + y + 3)
     A = rand(4, 4)
     @test (@.. A * y' + x) ≈ (@. A * y' + x)
     @test (@.. A * transpose(y) + x) ≈ (@. A * transpose(y) + x)
     Ashim = A[1:1, :]
-    @test_throws ArgumentError (@.. Ashim * y' + x) ≈ (@. Ashim * y' + x) # test fallback
+    @test_throws DimensionMismatch (@.. Ashim * y' + x) ≈ (@. Ashim * y' + x) # test fallback
     @test (@.. broadcast = true Ashim * y' + x) ≈ (@. Ashim * y' + x) # test fallback
     Av = view(A, 1, :)
     @test (@.. Av * y' + A) ≈ (@. Av * y' + A)
@@ -125,14 +126,22 @@ if GROUP == "All" || GROUP == "Core"
       dt = transpose(d)  # could also use permutedims, same problem
       @.. thread = true broadcast = false C = A * dt
       @test C ≈ A .* dt
-      @test_throws ArgumentError @.. broadcast = false A * [1.0]
+      @test_throws DimensionMismatch @.. broadcast = false A * [1.0]
     end
     @test FastBroadcast.indices_do_not_alias(typeof(view(fill(0, 10), 1:4)))
 
-    let ex = macroexpand(@__MODULE__,
-        :(@.. broadcast = false @view(J[idxs]) = @view(J[idxs]) - inv_alpha))
+    let ex = macroexpand(
+        @__MODULE__,
+        :(@.. broadcast = false @view(J[idxs]) = @view(J[idxs]) - inv_alpha),
+      )
       @test Base.Meta.isexpr(ex, :call)
       @test ex.args[1] === FastBroadcast.fast_materialize!
+    end
+    let v = rand(8), A = rand(4, 2), V = rand(8, 1), a = similar(v), b = similar(v)
+      @test (@. a = V) == (@.. b = V)
+      @test (@. a += V) == (@.. b += V)
+      @test_throws DimensionMismatch @.. a = A
+      @test_throws DimensionMismatch @.. a += A
     end
   end
   A = rand(4,2)

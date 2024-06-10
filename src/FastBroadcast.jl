@@ -22,9 +22,11 @@ end
 @inline function to_tup(::Val{M}, i::CartesianIndex{N}) where {M,N}
   if M < N
     ntuple(Fix{1}(getindex, Tuple(i)), Val(M))
-  else
+  elseif M == N
     M == N || error("Array of higher dimension than cartesian index.")
     Tuple(i)
+  else # M > N
+    (Tuple(i)..., ntuple(one, Val(M - N))...)
   end
 end
 
@@ -51,7 +53,11 @@ end
   i isa Int && return @inbounds A[i]
   axs = static_axes(A)
   @inbounds A[_rmap(
-    ifelse, _rmap(isone, size(A)), _rmap(first, axs), to_tup(Val(length(axs)), i))...]
+    ifelse,
+    _rmap(isone, size(A)),
+    _rmap(first, axs),
+    to_tup(Val(length(axs)), i),
+  )...]
 end
 
 @inline _all(@nospecialize(_), x::Tuple{}) = True()
@@ -73,37 +79,48 @@ end
 
 @inline _rall(@nospecialize(_), x::Tuple{}) = true
 @inline _rall(f, x::Tuple{X}) where {X} = f(only(x))
-@inline _rall(f, x::Tuple{X,Y,Vararg}) where {X,Y} = f(first(x)) &&
-                                                     _rall(f, Base.tail(x))
+@inline _rall(f, x::Tuple{X,Y,Vararg}) where {X,Y} = f(first(x)) && _rall(f, Base.tail(x))
 @inline _rall(x::Tuple) = _rall(identity, x)
 
 @inline _rmap(@nospecialize(_), ::Tuple{}) = ()
 @inline _rmap(f, x::Tuple{X}) where {X} = (f(only(x)),)
-@inline _rmap(f, x::Tuple{X,Y,Vararg}) where {X,Y} = (
-  f(first(x)), _rmap(f, Base.tail(x))...)
+@inline _rmap(f, x::Tuple{X,Y,Vararg}) where {X,Y} =
+  (f(first(x)), _rmap(f, Base.tail(x))...)
 
 @inline _rmap(@nospecialize(_), ::Tuple{}, ::Tuple{}) = ()
 @inline _rmap(f, a::Tuple{A}, x::Tuple{X}) where {A,X} = (@inline(f(only(a), only(x))),)
-@inline _rmap(f, a::Tuple{A,B,Vararg}, x::Tuple{X,Y,Vararg}) where {A,B,X,Y} = (
-  @inline(f(first(a), first(x))), _rmap(f, Base.tail(a), Base.tail(x))...)
+@inline _rmap(f, a::Tuple{A,B,Vararg}, x::Tuple{X,Y,Vararg}) where {A,B,X,Y} =
+  (@inline(f(first(a), first(x))), _rmap(f, Base.tail(a), Base.tail(x))...)
 
 @inline _rmap(@nospecialize(_), ::Tuple{}, ::Tuple{}, ::Tuple{}) = ()
-@inline _rmap(f, a::Tuple{A}, m::Tuple{M}, x::Tuple{X}) where {A,M,X} = (@inline(f(
-  only(a), only(m), only(x))),)
-@inline _rmap(f, a::Tuple{A,B,Vararg}, m::Tuple{M,N,Vararg}, x::Tuple{X,Y,Vararg}) where {A,B,M,N,X,Y} = (
+@inline _rmap(f, a::Tuple{A}, m::Tuple{M}, x::Tuple{X}) where {A,M,X} =
+  (@inline(f(only(a), only(m), only(x))),)
+@inline _rmap(
+  f,
+  a::Tuple{A,B,Vararg},
+  m::Tuple{M,N,Vararg},
+  x::Tuple{X,Y,Vararg},
+) where {A,B,M,N,X,Y} = (
   @inline(f(first(a), first(m), first(x))),
-  _rmap(f, Base.tail(a), Base.tail(m), Base.tail(x))...)
+  _rmap(f, Base.tail(a), Base.tail(m), Base.tail(x))...,
+)
 
 @inline function _static_match(
-  ax0::Tuple{Vararg{Any,M}}, ax1::Tuple{Vararg{Any,N}}) where {M,N}
-  subax1 = ntuple(Fix{1}(Base.getindex, ax1), Val(M))
-  eqs = _rmap(ax0, subax1) do x0, x1
+  ax0::Tuple{Vararg{Any,M}},
+  ax1::Tuple{Vararg{Any,N}},
+) where {M,N}
+  MN = M < N ? M : N
+  subax0 = ntuple(Fix{1}(Base.getindex, ax0), Val(MN))
+  subax1 = ntuple(Fix{1}(Base.getindex, ax1), Val(MN))
+  eqs = _rmap(subax0, subax1) do x0, x1
     Bool(_static_one(static_length(x0))) || x0 == x1
   end
   _rall(eqs)
 end
 @inline function _dynamic_match(
-  ax0::Tuple{Vararg{Any,M}}, ax1::Tuple{Vararg{Any,N}}) where {M,N}
+  ax0::Tuple{Vararg{Any,M}},
+  ax1::Tuple{Vararg{Any,N}},
+) where {M,N}
   subax1 = ntuple(Fix{1}(Base.getindex, ax1), Val(M))
   eqs = _rmap(ax0, subax1) do x0, x1
     isone(length(x0)) || x0 == x1
@@ -122,10 +139,12 @@ end
   _rall(_rmap(Fix{2}(_checkaxes, ax), bc.args))
 end
 
-@inline _static_checkaxes(::Union{Number,Base.RefValue}, ::Tuple{Vararg{Any,N}}) where {N} = true,
-False()
+@inline _static_checkaxes(::Union{Number,Base.RefValue}, ::Tuple{Vararg{Any,N}}) where {N} =
+  true, False()
 @inline function _static_checkaxes(
-  ::Tuple{Vararg{Any,M}}, ax::Tuple{Vararg{Any,N}}) where {M,N}
+  ::Tuple{Vararg{Any,M}},
+  ax::Tuple{Vararg{Any,N}},
+) where {M,N}
   M == 1 || M == length(first(ax)), N == 1 ? False() : True()
 end
 @inline function _static_checkaxes(B, ax::Tuple{Vararg{Any,N}}) where {N}
@@ -164,10 +183,15 @@ end
 end
 
 @inline function _fast_materialize!(
-  dst, ::Val{NOALIAS}, ::False, bc::Broadcasted) where {NOALIAS}
+  dst,
+  ::Val{NOALIAS},
+  ::False,
+  bc::Broadcasted,
+) where {NOALIAS}
   _no_dyn_broadcast, _islinear = _static_checkaxes(bc, static_axes(dst))
-  @boundscheck _no_dyn_broadcast ||
-               throw(ArgumentError("Some axes are not equal, or feature a dynamic broadcast!"))
+  @boundscheck _no_dyn_broadcast || throw(
+    DimensionMismatch("Some axes are not equal, or feature a dynamic broadcast!"),
+  )
   __fast_materialize!(dst, Val(NOALIAS), bc, _islinear)
   return dst
 end
@@ -178,20 +202,27 @@ use_fast_broadcast(::Type{<:Base.Broadcast.DefaultArrayStyle}) = true
 use_fast_broadcast(::Type{<:Base.Broadcast.DefaultArrayStyle{0}}) = false
 
 @inline function _fast_materialize!(
-  dst, ::Val{NOALIAS}, ::True, bc::Broadcasted) where {NOALIAS}
+  dst,
+  ::Val{NOALIAS},
+  ::True,
+  bc::Broadcasted,
+) where {NOALIAS}
   sad = static_axes(dst)
   _no_dyn_broadcast, _islinear = _static_checkaxes(bc, sad)
   _no_dyn_broadcast && return __fast_materialize!(dst, Val(NOALIAS), bc, _islinear)
-  @boundscheck _checkaxes(bc, sad) || throw(ArgumentError("Size mismatch."))
+  @boundscheck _checkaxes(bc, sad) || throw(DimensionMismatch("Size mismatch."))
   _slow_materialize!(dst, Val(NOALIAS), bc)
 end
 fast_materialize!(_, _, dst, x::Number) = fill!(dst, x)
-fast_materialize!(_, ::False, dst, x::AbstractArray) = copyto!(dst, x)
+function fast_materialize!(_, ::False, dst, x::AbstractArray)
+  Base.Broadcast.check_broadcast_shape(size(dst), size(x))
+  copyto!(dst, x)
+end
 function fast_materialize!(_, ::True, dst, x::AbstractArray)
   sad = static_axes(dst)
   _no_dyn_broadcast, _ = _static_checkaxes(x, sad)
   _no_dyn_broadcast && return copyto!(dst, x)
-  @boundscheck _checkaxes(x, sad) || throw(ArgumentError("Size mismatch."))
+  @boundscheck _checkaxes(x, sad) || throw(DimensionMismatch("Size mismatch."))
   (Base.BroadcastStyle(typeof(x)) isa Base.Broadcast.DefaultArrayStyle) || return dst .= x
   for i in CartesianIndices(dst)
     @inbounds dst[i] = _slowindex(x, i)
@@ -200,21 +231,13 @@ function fast_materialize!(_, ::True, dst, x::AbstractArray)
 end
 fast_materialize!(_, _, dst, x) = dst .= x
 
-function _slow_materialize!(
-  dst,
-  ::Val{true},
-  bc::Broadcasted
-)
+function _slow_materialize!(dst, ::Val{true}, bc::Broadcasted)
   @simd ivdep for i in CartesianIndices(dst)
     @inbounds dst[i] = _slowindex(bc, i)
   end
   return dst
 end
-function _slow_materialize!(
-  dst,
-  ::Val{false},
-  bc::Broadcasted
-)
+function _slow_materialize!(dst, ::Val{false}, bc::Broadcasted)
   for i in CartesianIndices(dst)
     @inbounds dst[i] = _slowindex(bc, i)
   end
@@ -222,11 +245,19 @@ function _slow_materialize!(
 end
 
 Base.@propagate_inbounds function fast_materialize(
-  ::SB, ::DB, bc::Broadcasted{S}) where {S,SB,DB}
+  ::SB,
+  ::DB,
+  bc::Broadcasted{S},
+) where {S,SB,DB}
   if S === Base.Broadcast.DefaultArrayStyle{0}
     return _fastindex(bc, 1)
   elseif S <: Base.Broadcast.DefaultArrayStyle
-    fast_materialize!(SB(), DB(), similar(bc, Base.Broadcast.combine_eltypes(bc.f, bc.args)), bc)
+    fast_materialize!(
+      SB(),
+      DB(),
+      similar(bc, Base.Broadcast.combine_eltypes(bc.f, bc.args)),
+      bc,
+    )
   else
     Base.Broadcast.materialize(bc)
   end
@@ -234,7 +265,11 @@ end
 fast_materialize(@nospecialize(_), @nospecialize(_), @nospecialize(x)) = x
 
 Base.@propagate_inbounds function fast_materialize!(
-  ::False, ::DB, dst::A, bc::Broadcasted{S}) where {S,DB,A}
+  ::False,
+  ::DB,
+  dst::A,
+  bc::Broadcasted{S},
+) where {S,DB,A}
   if S === Base.Broadcast.DefaultArrayStyle{0}
     fill!(dst, _fastindex(bc, 1))
   elseif S <: Base.Broadcast.DefaultArrayStyle
@@ -244,21 +279,27 @@ Base.@propagate_inbounds function fast_materialize!(
   end
 end
 
-@inline _view(A::AbstractArray{<:Any,N}, r, ::Val{N}) where {N} = view(
-  A, ntuple(_ -> :, N - 1)..., r)
+@inline _view(A::AbstractArray{<:Any,N}, r, ::Val{N}) where {N} =
+  view(A, ntuple(_ -> :, N - 1)..., r)
 @inline _view(A::AbstractArray, r, ::Val) = A
 @inline _view(x, r, ::Val) = x
 @inline __view(t::Tuple{T}, r, ::Val{N}) where {T,N} = (_view(first(t), r, Val(N)),)
-@inline __view(t::Tuple{T,Vararg}, r, ::Val{N}) where {T,N} = (
-  _view(first(t), r, Val(N)), __view(Base.tail(t), r, Val(N))...)
+@inline __view(t::Tuple{T,Vararg}, r, ::Val{N}) where {T,N} =
+  (_view(first(t), r, Val(N)), __view(Base.tail(t), r, Val(N))...)
 @inline function _view(
   bc::Base.Broadcast.Broadcasted{<:Base.Broadcast.AbstractArrayStyle{N},Nothing},
-  r, ::Val{N}) where {N}
+  r,
+  ::Val{N},
+) where {N}
   Base.Broadcast.Broadcasted(bc.f, __view(bc.args, r, Val(N)))
 end
-@inline _view(bc::Base.Broadcast.Broadcasted{<:Base.Broadcast.AbstractArrayStyle}, _, ::Val{N}) where {N} = bc
-@inline _view(t::Tuple{Vararg{AbstractRange,N}}, r, ::Val{N}) where {N} = (
-  Base.front(t)..., r)
+@inline _view(
+  bc::Base.Broadcast.Broadcasted{<:Base.Broadcast.AbstractArrayStyle},
+  _,
+  ::Val{N},
+) where {N} = bc
+@inline _view(t::Tuple{Vararg{AbstractRange,N}}, r, ::Val{N}) where {N} =
+  (Base.front(t)..., r)
 
 @inline function fast_materialize!(::True, ::DB, dst, bc::Broadcasted{S}) where {S,DB}
   if S === Base.Broadcast.DefaultArrayStyle{0}
@@ -278,11 +319,18 @@ end
   dst,
   ::DB,
   bc::Broadcasted,
-  dstaxes::Tuple{Vararg{Any,N}}
+  dstaxes::Tuple{Vararg{Any,N}},
 ) where {N,DB}
   last_dstaxes = dstaxes[N]
-  Polyester.batch(_batch_broadcast_fn, (length(last_dstaxes), Threads.nthreads()),
-    dst, last_dstaxes, bc, Val(N), DB())
+  Polyester.batch(
+    _batch_broadcast_fn,
+    (length(last_dstaxes), Threads.nthreads()),
+    dst,
+    last_dstaxes,
+    bc,
+    Val(N),
+    DB(),
+  )
   return dst
 end
 
@@ -307,9 +355,17 @@ end
   Base.maybeview(args...)
 end
 
+function _view!(ex::Expr)
+  r = Expr(:ref)
+  r.args = ex.args
+  ex.head = :macrocall
+  # `maybeview` doesn't return a `Broadcasted` object
+  ex.args = Any[Symbol("@views"), Base.LineNumberNode(@__LINE__, @__FILE__), r]
+  return nothing
+end
+
 function _fb_macro!(ex::Expr, threadarg, broadcastarg)
-  ops = (:(+), :(-), :(*), :(/), :(\), :(÷), :(&),
-    :(|), :(⊻), :(>>), :(>>>), :(<<), :(^))
+  ops = (:(+), :(-), :(*), :(/), :(\), :(÷), :(&), :(|), :(⊻), :(>>), :(>>>), :(<<), :(^))
   if Meta.isexpr(ex, :(.)) && length(ex.args) == 2
     args = ex.args[2]
     args isa QuoteNode && return
@@ -330,8 +386,24 @@ function _fb_macro!(ex::Expr, threadarg, broadcastarg)
       return
     end
     pushfirst!(ex.args, _broadcasted)
-    ind = Base.findfirst(==(ex.args[2]), (Symbol(".+"), Symbol(".-"), Symbol(".*"), Symbol("./"), Symbol(".\\"),
-      Symbol(".÷"), Symbol(".&"), Symbol(".|"), Symbol(".⊻"), Symbol(".>>"), Symbol(".>>>"), Symbol(".<<"), Symbol(".^")))
+    ind = Base.findfirst(
+      ==(ex.args[2]),
+      (
+        Symbol(".+"),
+        Symbol(".-"),
+        Symbol(".*"),
+        Symbol("./"),
+        Symbol(".\\"),
+        Symbol(".÷"),
+        Symbol(".&"),
+        Symbol(".|"),
+        Symbol(".⊻"),
+        Symbol(".>>"),
+        Symbol(".>>>"),
+        Symbol(".<<"),
+        Symbol(".^"),
+      ),
+    )
     if ind !== nothing
       ex.args[2] = ops[ind]
     end
@@ -342,8 +414,7 @@ function _fb_macro!(ex::Expr, threadarg, broadcastarg)
     pushfirst!(ex.args, fast_materialize!)
     a4 = ex.args[4]
     if Meta.isexpr(a4, :ref)
-      a4.head = :call
-      pushfirst!(a4.args, Base.maybeview)
+      _view!(a4)
       skip = 4
     end
   elseif Meta.isexpr(ex, :($), 1)
@@ -353,17 +424,28 @@ function _fb_macro!(ex::Expr, threadarg, broadcastarg)
       return
     end
   elseif Meta.isexpr(ex, :ref)
-    r = Expr(:ref)
-    r.args = ex.args
-    ex.head = :macrocall
-    ex.args = Any[Symbol("@views"), Base.LineNumberNode(@__LINE__, @__FILE__), r]
-    return # `maybeview` doesn't return a `Broadcasted` object
+    return _view!(ex)
   elseif Meta.isexpr(ex, :let)
     skip = 1
   else
     ind = Base.findfirst(
-      ==(ex.head), (:(+=), :(-=), :(*=), :(/=), :(\=), :(÷=), :(&=),
-        :(|=), :(⊻=), :(>>=), :(>>>=), :(<<=), :(^=)))
+      ==(ex.head),
+      (
+        :(+=),
+        :(-=),
+        :(*=),
+        :(/=),
+        :(\=),
+        :(÷=),
+        :(&=),
+        :(|=),
+        :(⊻=),
+        :(>>=),
+        :(>>>=),
+        :(<<=),
+        :(^=),
+      ),
+    )
     if ind !== nothing
       op = ops[ind]
       # x op= f(args...) -> x = op(x, f(args...))
@@ -373,10 +455,9 @@ function _fb_macro!(ex::Expr, threadarg, broadcastarg)
       return _fb_macro!(ex, threadarg, broadcastarg)
     end
   end
-  for i in (1+skip):length(ex.args)
+  for i = (1+skip):length(ex.args)
     x = ex.args[i]
-    x isa Expr &&
-      _fb_macro!(x, threadarg, broadcastarg)
+    x isa Expr && _fb_macro!(x, threadarg, broadcastarg)
   end
 end
 function fb_macro!(ex::Expr, threadarg, broadcastarg)
@@ -419,7 +500,7 @@ function _validate_kwarg(kwarg)
   @assert (argname === :thread) || (argname === :broadcast)
   argname === :thread
 end
-function _process_kwarg(kwarg, threadarg=false, broadcastarg=false)
+function _process_kwarg(kwarg, threadarg = false, broadcastarg = false)
   if _validate_kwarg(kwarg)
     return __process_kwarg(kwarg), broadcastarg
   else
@@ -439,8 +520,20 @@ end
 
 let # we could check `hasfield(Method, :recursion_relation)`, but I'd rather see an error if things change
   dont_limit = Returns(true)
-  for f in (_fastindex, _slowindex, _checkaxes, _static_checkaxes,
-    __any, _any, __all, _all, _rall, _rmap, __view, _view)
+  for f in (
+    _fastindex,
+    _slowindex,
+    _checkaxes,
+    _static_checkaxes,
+    __any,
+    _any,
+    __all,
+    _all,
+    _rall,
+    _rmap,
+    __view,
+    _view,
+  )
     for m in methods(f)
       m.recursion_relation = dont_limit
     end
