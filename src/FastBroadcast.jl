@@ -107,6 +107,8 @@ end
   ax0::Tuple{Vararg{Any,M}},
   ax1::Tuple{Vararg{Any,N}},
 ) where {M,N}
+  N < M &&
+    throw(DimensionMismatch("Source has larger dimension ($M) than destination ($N)"))
   subax1 = ntuple(Fix{1}(Base.getindex, ax1), Val(M))
   eqs = _rmap(ax0, subax1) do x0, x1
     Bool(_static_one(static_length(x0))) || x0 == x1
@@ -210,7 +212,10 @@ use_fast_broadcast(::Type{<:Base.Broadcast.DefaultArrayStyle{0}}) = false
   _slow_materialize!(dst, Val(NOALIAS), bc)
 end
 fast_materialize!(_, _, dst, x::Number) = fill!(dst, x)
-fast_materialize!(_, ::False, dst, x::AbstractArray) = copyto!(dst, x)
+function fast_materialize!(_, ::False, dst, x::AbstractArray)
+  Base.Broadcast.check_broadcast_shape(size(dst), size(x))
+  copyto!(dst, x)
+end
 function fast_materialize!(_, ::True, dst, x::AbstractArray)
   sad = static_axes(dst)
   _no_dyn_broadcast, _ = _static_checkaxes(x, sad)
