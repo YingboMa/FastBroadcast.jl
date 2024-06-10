@@ -135,7 +135,9 @@ if GROUP == "All" || GROUP == "Core"
       @test ex.args[1] === FastBroadcast.fast_materialize!
     end
   end
-
+  A = rand(4,2)
+  v = rand(8)
+  @test_throws Base.DimensionMismatch @.. A = v
   VERSION >= v"1.6" && PerformanceTestTools.@include("vectorization_tests.jl")
 end
 
