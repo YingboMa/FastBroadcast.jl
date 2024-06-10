@@ -22,9 +22,11 @@ end
 @inline function to_tup(::Val{M}, i::CartesianIndex{N}) where {M,N}
   if M < N
     ntuple(Fix{1}(getindex, Tuple(i)), Val(M))
-  else
+  elseif M == N
     M == N || error("Array of higher dimension than cartesian index.")
     Tuple(i)
+  else # M > N
+    (Tuple(i)..., ntuple(one, Val(M - N))...)
   end
 end
 
@@ -107,10 +109,10 @@ end
   ax0::Tuple{Vararg{Any,M}},
   ax1::Tuple{Vararg{Any,N}},
 ) where {M,N}
-  N < M &&
-    throw(DimensionMismatch("Source has larger dimension ($M) than destination ($N)"))
-  subax1 = ntuple(Fix{1}(Base.getindex, ax1), Val(M))
-  eqs = _rmap(ax0, subax1) do x0, x1
+  MN = M < N ? M : N
+  subax0 = ntuple(Fix{1}(Base.getindex, ax0), Val(MN))
+  subax1 = ntuple(Fix{1}(Base.getindex, ax1), Val(MN))
+  eqs = _rmap(subax0, subax1) do x0, x1
     Bool(_static_one(static_length(x0))) || x0 == x1
   end
   _rall(eqs)

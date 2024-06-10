@@ -50,7 +50,7 @@ if GROUP == "All" || GROUP == "Core"
     @test (@.. A * y' + x) ≈ (@. A * y' + x)
     @test (@.. A * transpose(y) + x) ≈ (@. A * transpose(y) + x)
     Ashim = A[1:1, :]
-    @test_throws ArgumentError (@.. Ashim * y' + x) ≈ (@. Ashim * y' + x) # test fallback
+    @test_throws DimensionMismatch (@.. Ashim * y' + x) ≈ (@. Ashim * y' + x) # test fallback
     @test (@.. broadcast = true Ashim * y' + x) ≈ (@. Ashim * y' + x) # test fallback
     Av = view(A, 1, :)
     @test (@.. Av * y' + A) ≈ (@. Av * y' + A)
@@ -125,7 +125,7 @@ if GROUP == "All" || GROUP == "Core"
       dt = transpose(d)  # could also use permutedims, same problem
       @.. thread = true broadcast = false C = A * dt
       @test C ≈ A .* dt
-      @test_throws ArgumentError @.. broadcast = false A * [1.0]
+      @test_throws DimensionMismatch @.. broadcast = false A * [1.0]
     end
     @test FastBroadcast.indices_do_not_alias(typeof(view(fill(0, 10), 1:4)))
 
@@ -135,6 +135,12 @@ if GROUP == "All" || GROUP == "Core"
       )
       @test Base.Meta.isexpr(ex, :call)
       @test ex.args[1] === FastBroadcast.fast_materialize!
+    end
+    let v = rand(8), A = rand(4, 2), V = rand(8, 1), a = similar(v), b = similar(v)
+      @test (@. a = V) == (@.. b = V)
+      @test (@. a += V) == (@.. b += V)
+      @test_throws DimensionMismatch @.. a = A
+      @test_throws DimensionMismatch @.. a += A
     end
   end
 
