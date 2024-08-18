@@ -1,6 +1,6 @@
 # FastBroadcast
 
-[![Build Status](https://github.com/YingboMa/FastBroadcast.jl/workflows/CI/badge.svg)](https://github.com/YingboMa/FastBroadcast.jl/actions)
+[![Build Status](https://github.com/YingboMa/FastBroadcast.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/YingboMa/FastBroadcast.jl/actions?query=workflow%3ACI)
 [![Coverage](https://codecov.io/gh/YingboMa/FastBroadcast.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/YingboMa/FastBroadcast.jl)
 
 FastBroadcast.jl exports `@..` that compiles broadcast expressions into loops
