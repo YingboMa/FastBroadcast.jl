@@ -16,15 +16,11 @@ if GROUP == "All" || GROUP == "Core"
     dst = zeros(Int, 4)
     bc = Broadcast.Broadcasted(+, (Broadcast.Broadcasted(*, (x, y)), x, y, x, y, x, y))
     bcref = copy(bc)
-    @test FastBroadcast.fast_materialize!(
-      FastBroadcast.False(),
-      FastBroadcast.True(),
+    @test FastBroadcast.fast_materialize_threaded!(
       dst,
       bc,
     ) == bcref
     @test FastBroadcast.fast_materialize!(
-      FastBroadcast.False(),
-      FastBroadcast.False(),
       dst,
       bc,
     ) == bcref
