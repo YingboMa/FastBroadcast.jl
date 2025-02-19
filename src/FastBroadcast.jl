@@ -40,7 +40,7 @@ end
 function axismatch(ax1, ax2)
     ax1 isa SingularAxis && return true
     ax2 isa SingularAxis && return true
-    ax1 == ax2
+    length(ax1) == length(ax2)
 end
 
 const VecAdjTrans = Union{Transpose{T, M}, Adjoint{T, M}} where {T, M<:AbstractVector}
@@ -76,7 +76,7 @@ end
 function broadcast_islinear(B, ax::Tuple{Vararg{Any, N}}) where {N}
     bx = semi_static_axes(B)
     if (IndexStyle(typeof(B)) === IndexLinear()) && length(bx) == N
-        any(isequal(1), bx)
+        any(isequal(SingularAxis()), bx)
     else
         true
     end
