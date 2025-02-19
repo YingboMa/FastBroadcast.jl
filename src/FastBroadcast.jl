@@ -1,18 +1,14 @@
 module FastBroadcast
 
-using Core: CodeInfo
-using Base: UV_UNKNOWN, @propagate_inbounds, threadcall_restrictor
-export @..
-
-using StaticArrayInterface: static_axes, static_length
-using ArrayInterface: indices_do_not_alias
+using Base: @propagate_inbounds
 using Base.Broadcast: Broadcasted, materialize, materialize!
+
+using ArrayInterface: indices_do_not_alias
+using StaticArrayInterface: static_axes, static_length
 using LinearAlgebra: Adjoint, Transpose
 using Polyester
-using StrideArraysCore: AbstractStrideArray
 
-# break @inbounds
-_slowindex(bc, i) = bc[i]
+export @..
 
 function __fast_materialize!(dst, ::Val{true}, bc::Broadcasted, ::Val{false})
     @simd ivdep for i in eachindex(dst)
@@ -39,58 +35,63 @@ function __fast_materialize!(dst, ::Val{false}, bc::Broadcasted, ::Val{true})
     return dst
 end
 
-check_no_dyn_broadcast(::Union{Number, Base.RefValue}, ::Tuple{Vararg{Any, N}}) where {N} = true
-function check_no_dyn_broadcast(::Tuple{Vararg{Any, M}}, ax::Tuple{Vararg{Any, N}}) where {M, N}
-    M == 1 || M == length(first(ax))
+struct SingularAxis
 end
+function axismatch(ax1, ax2)
+    ax1 isa SingularAxis && return true
+    ax2 isa SingularAxis && return true
+    ax1 == ax2
+end
+
+const VecAdjTrans = Union{Transpose{T, M}, Adjoint{T, M}} where {T, M<:AbstractVector}
+semi_static_axes(A) = Base.axes(A)
+semi_static_axes(A::VecAdjTrans)  = (SingularAxis(), only(semi_static_axes(parent(A))))
+semi_static_axes(A::Tuple{T}) where T = (SingularAxis(),)
+function semi_static_axes(S::SubArray)
+    parent_axes = semi_static_axes(parent(S))
+    map(singularize_singular_slice, parent_axes, S.indices)
+end
+function singularize_singular_slice(parent_ax, ax)
+    ax isa Integer ? SingularAxis() : ax isa Base.Slice ? parent_ax : ax
+end
+
+check_no_dyn_broadcast(::Union{Number, Base.RefValue}, ::Tuple{Vararg{Any, N}}) where {N} = true
 function check_no_dyn_broadcast(B, ax::Tuple{Vararg{Any, N}}) where {N}
-    bx = axes(B)
-    if length(ax) < length(bx)
-        for i in 1:length(ax)
-            ax[i] != bx[i] && return false
-        end
-        for i in length(ax)+1:length(bx)
-            length(bx[i]) != 1 && return false
-        end
-    else
-        for i in 1:length(bx)
-            ax[i] != bx[i] && return false
-        end
-        for i in length(bx)+1:length(ax)
-            length(ax[i]) != 1 && return false
-        end
+    bx = semi_static_axes(B)
+    for i in 1:min(length(ax), length(bx))
+        axismatch(ax[i], bx[i]) || return false
     end
     return true
 end
+
 function check_no_dyn_broadcast(bc::Broadcasted, ax::Tuple{Vararg{Any, N}}) where {N}
     all(Base.Fix2(check_no_dyn_broadcast, ax), bc.args)
 end
 
 broadcast_islinear(::Union{Number, Base.RefValue}, ::Tuple{Vararg{Any, N}}) where {N} = false
 function broadcast_islinear(::Tuple{Vararg{Any, M}}, ::Tuple{Vararg{Any, N}}) where {M, N}
-    N != 1
+    M != 1
 end
+
 function broadcast_islinear(B, ax::Tuple{Vararg{Any, N}}) where {N}
-    bx = axes(B)
+    bx = semi_static_axes(B)
     if (IndexStyle(typeof(B)) === IndexLinear()) && length(bx) == N
         any(isequal(1), bx)
     else
         true
     end
 end
+
 function broadcast_islinear(bc::Broadcasted, ax::Tuple{Vararg{Any, N}}) where N
     any(Base.Fix2(broadcast_islinear, ax), bc.args)
 end
-function _fast_materialize!(
-        dst,
-        ::Val{NOALIAS},
-        bc::Broadcasted
-) where {NOALIAS}
-    _no_dyn_broadcast = check_no_dyn_broadcast(bc, axes(dst))
-    _islinear = broadcast_islinear(bc, axes(dst))
+
+function _fast_materialize!(dst, ::Val{NOALIAS},  bc::Broadcasted) where {NOALIAS}
+    _no_dyn_broadcast = check_no_dyn_broadcast(bc, semi_static_axes(dst))
     @boundscheck _no_dyn_broadcast || throw(
         DimensionMismatch("Some axes are not equal, or feature a dynamic broadcast!"),
     )
+    _islinear = broadcast_islinear(bc, semi_static_axes(dst))
     __fast_materialize!(dst, Val(NOALIAS), bc, Val(_islinear))
     return dst
 end
@@ -105,26 +106,13 @@ function fast_materialize!(dst, x::AbstractArray)
     Base.Broadcast.check_broadcast_shape(size(dst), size(x))
     copyto!(dst, x)
 end
+
 fast_materialize!(_, _, dst, x) = dst .= x
 
-function _slow_materialize!(dst, ::Val{true}, bc::Broadcasted)
-    @simd ivdep for i in CartesianIndices(dst)
-        @inbounds dst[i] = _slowindex(bc, i)
-    end
-    return dst
-end
-function _slow_materialize!(dst, ::Val{false}, bc::Broadcasted)
-    for i in CartesianIndices(dst)
-        @inbounds dst[i] = _slowindex(bc, i)
-    end
-    return dst
-end
-
 Base.@propagate_inbounds function fast_materialize(
-        bc::Broadcasted{S}
-) where {S}
+        bc::Broadcasted{S}) where {S}
     if S === Base.Broadcast.DefaultArrayStyle{0}
-        return bc[1]
+        return only(bc)
     elseif S <: Base.Broadcast.DefaultArrayStyle
         fast_materialize!(
             similar(bc, Base.Broadcast.combine_eltypes(bc.f, bc.args)),
@@ -134,12 +122,11 @@ Base.@propagate_inbounds function fast_materialize(
         materialize(bc)
     end
 end
-fast_materialize(@nospecialize(_), @nospecialize(_), @nospecialize(x)) = x
+
+fast_materialize(@nospecialize(x)) = x
 
 Base.@propagate_inbounds function fast_materialize!(
-        dst::A,
-        bc::Broadcasted{S}
-) where {S, A}
+        dst::A, bc::Broadcasted{S}) where {S, A}
     if S === Base.Broadcast.DefaultArrayStyle{0}
         fill!(dst, bc[1])
     elseif S <: Base.Broadcast.DefaultArrayStyle
@@ -166,7 +153,8 @@ end
 @inline _view(bc::Base.Broadcast.Broadcasted{<:Base.Broadcast.AbstractArrayStyle}, _, ::Val{N}) where {N} = bc
 @inline _view(t::Tuple{Vararg{AbstractRange, N}}, r, ::Val{N}) where {N} = (Base.front(t)..., r)
 
-@inline function _batch_broadcast_fn((dest, ldstaxes, bcobj, VN), start, stop)
+@inline function _batch_broadcast_fn(tup, start, stop)
+    (dest, ldstaxes, bcobj, VN) = tup
     r = @inbounds ldstaxes[start:stop]
     fast_materialize!(_view(dest, r, VN), _view(bcobj, r, VN))
     return nothing
@@ -189,7 +177,7 @@ _dim0(_) = false
 _dim0(::Base.Broadcast.Broadcasted{Base.Broadcast.DefaultArrayStyle{0}}) = true
 @inline function _broadcasted(f::F, args...) where {F}
     bc = Base.Broadcast.broadcasted(f, args...)
-    _dim0(bc) ? bc[1] : bc
+    _dim0(bc) ? only(bc) : bc
 end
 @inline _broadcasted(::Colon, arg0, arg1) = arg0:arg1
 @inline _broadcasted(::typeof(Base.maybeview), args...) = begin
