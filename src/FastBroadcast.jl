@@ -1,39 +1,47 @@
 module FastBroadcast
 
-using Base: @propagate_inbounds
+using Base: @propagate_inbounds, Fix1, Fix2
 using Base.Broadcast: Broadcasted, materialize, materialize!
 
-using ArrayInterface: indices_do_not_alias
+using ArrayInterface: indices_do_not_alias, flatten_tuples
 using StaticArrayInterface: static_axes, static_length
 using LinearAlgebra: Adjoint, Transpose
 using Polyester
 
 export @..
 
-function __fast_materialize!(dst, ::Val{true}, bc::Broadcasted, ::Val{false})
-    @simd ivdep for i in eachindex(dst)
-        @inbounds dst[i] = bc[i]
+@inline function to_tup(::Val{M}, i::CartesianIndex{N}) where {M, N}
+    if M < N
+        ntuple(Fix1(getindex, Tuple(i)), Val(M))
+    elseif M == N
+        Tuple(i)
+    else # M > N
+        (Tuple(i)..., ntuple(one, Val(M - N))...)
     end
-    return dst
 end
-function __fast_materialize!(dst, ::Val{true}, bc::Broadcasted, ::Val{true})
-    @simd ivdep for i in CartesianIndices(dst)
-        @inbounds dst[i] = bc[i]
-    end
-    return dst
-end
-function __fast_materialize!(dst, ::Val{false}, bc::Broadcasted, ::Val{false})
-    for i in eachindex(dst)
-        @inbounds dst[i] = bc[i]
-    end
-    return dst
-end
-function __fast_materialize!(dst, ::Val{false}, bc::Broadcasted, ::Val{true})
-    for i in CartesianIndices(dst)
-        @inbounds dst[i] = bc[i]
-    end
-    return dst
-end
+
+@inline _rall(f, x::Tuple{}) = true
+@inline _rall(f, x::Tuple{X}) where {X} = f(only(x))
+@inline _rall(f, x::Tuple{X, Y, Vararg}) where {X, Y} = f(first(x)) && _rall(f, Base.tail(x))
+
+@inline _rmap(f, ::Tuple{}) = ()
+@inline _rmap(f, x::Tuple{X}) where {X} = (@inline(f(only(x))),)
+@inline _rmap(f, x::Tuple{X, Y, Vararg}) where {X, Y} = (
+    @inline(f(first(x))), _rmap(f, Base.tail(x))...)
+
+@inline _rmap(f, ::Tuple{}, ::Tuple{}) = ()
+@inline _rmap(f, a::Tuple{A}, x::Tuple{X}) where {A, X} = (@inline(f(only(a), only(x))),)
+@inline _rmap(f, a::Tuple{A, B, Vararg}, x::Tuple{X, Y, Vararg}) where {A, B, X, Y} = (
+    @inline(f(first(a), first(x))), _rmap(f, Base.tail(a), Base.tail(x))...)
+@inline _rmap(
+    f,
+    a::Tuple{A, B, Vararg},
+    m::Tuple{M, N, Vararg},
+    x::Tuple{X, Y, Vararg}
+    ) where {A, B, M, N, X, Y} = (
+    @inline(f(first(a), first(m), first(x))),
+    _rmap(f, Base.tail(a), Base.tail(m), Base.tail(x))...
+)
 
 struct SingularAxis
 end
@@ -49,23 +57,23 @@ semi_static_axes(A::VecAdjTrans)  = (SingularAxis(), only(semi_static_axes(paren
 semi_static_axes(A::Tuple{T}) where T = (SingularAxis(),)
 function semi_static_axes(S::SubArray)
     parent_axes = semi_static_axes(parent(S))
-    map(singularize_singular_slice, parent_axes, S.indices)
+    flatten_tuples(_rmap(singularize_singular_slice, parent_axes, S.indices))
 end
 function singularize_singular_slice(parent_ax, ax)
-    ax isa Integer ? SingularAxis() : ax isa Base.Slice ? parent_ax : ax
+    ax isa Integer ? () : ax isa Base.Slice ? parent_ax : ax
 end
 
 check_no_dyn_broadcast(::Union{Number, Base.RefValue}, ::Tuple{Vararg{Any, N}}) where {N} = true
-function check_no_dyn_broadcast(B, ax::Tuple{Vararg{Any, N}}) where {N}
+@inline function check_no_dyn_broadcast(B, ax::Tuple{Vararg{Any, N}}) where {N}
     bx = semi_static_axes(B)
-    for i in 1:min(length(ax), length(bx))
-        axismatch(ax[i], bx[i]) || return false
-    end
-    return true
+    MN = min(length(ax), length(bx))
+    subax = ntuple(Fix1(Base.getindex, ax), Val(MN))
+    subbx = ntuple(Fix1(Base.getindex, bx), Val(MN))
+    _rall(identity, _rmap(axismatch, subax, subbx))
 end
 
-function check_no_dyn_broadcast(bc::Broadcasted, ax::Tuple{Vararg{Any, N}}) where {N}
-    all(Base.Fix2(check_no_dyn_broadcast, ax), bc.args)
+@inline function check_no_dyn_broadcast(bc::Broadcasted, ax::Tuple{Vararg{Any, N}}) where {N}
+    _rall(Fix2(check_no_dyn_broadcast, ax), bc.args)
 end
 
 broadcast_islinear(::Union{Number, Base.RefValue}, ::Tuple{Vararg{Any, N}}) where {N} = false
@@ -76,22 +84,62 @@ end
 function broadcast_islinear(B, ax::Tuple{Vararg{Any, N}}) where {N}
     bx = semi_static_axes(B)
     if (IndexStyle(typeof(B)) === IndexLinear()) && length(bx) == N
-        any(isequal(SingularAxis()), bx)
+        !_rall(!isequal(SingularAxis()), bx)
     else
         true
     end
 end
 
 function broadcast_islinear(bc::Broadcasted, ax::Tuple{Vararg{Any, N}}) where N
-    any(Base.Fix2(broadcast_islinear, ax), bc.args)
+    !_rall(Fix2(!broadcast_islinear, ax), bc.args)
 end
 
-function _fast_materialize!(dst, ::Val{NOALIAS},  bc::Broadcasted) where {NOALIAS}
+@inline _fastindex(b::Number, _) = b
+@inline _fastindex(b::Tuple{X}, _) where {X} = only(b)
+@inline _fastindex(b::Base.RefValue, _) = b[]
+@inline _fastindex(b::Tuple{X, Y, Vararg}, i) where {X, Y} = @inbounds b[i]
+@inline _fastindex(b::Broadcasted, i) = b.f(_rmap(Fix2(_fastindex, i), b.args)...)
+@inline function _fastindex(A, i)
+    i isa Int && return @inbounds A[i]
+    axs = semi_static_axes(A)
+    inds = _rmap(axs, to_tup(Val(length(axs)), i)) do ax, j
+        ax isa SingularAxis ? 1 : j
+    end
+    @inbounds A[inds...]
+end
+
+@inline function __fast_materialize!(dst, ::Val{true}, bc::Broadcasted, ::Val{false})
+    @simd ivdep for i in eachindex(dst)
+        @inbounds dst[i] = _fastindex(bc, i)
+    end
+    return dst
+end
+@inline function __fast_materialize!(dst, ::Val{true}, bc::Broadcasted, ::Val{true})
+    @simd ivdep for i in CartesianIndices(dst)
+        @inbounds dst[i] = _fastindex(bc, i)
+    end
+    return dst
+end
+@inline function __fast_materialize!(dst, ::Val{false}, bc::Broadcasted, ::Val{false})
+    for i in eachindex(dst)
+        @inbounds dst[i] = _fastindex(bc, i)
+    end
+    return dst
+end
+@inline function __fast_materialize!(dst, ::Val{false}, bc::Broadcasted, ::Val{true})
+    for i in CartesianIndices(dst)
+        @inbounds dst[i] = _fastindex(bc, i)
+    end
+    return dst
+end
+
+@inline function _fast_materialize!(dst, ::Val{NOALIAS},  bc::Broadcasted) where {NOALIAS}
+    dstax = semi_static_axes(dst)
     _no_dyn_broadcast = check_no_dyn_broadcast(bc, semi_static_axes(dst))
     @boundscheck _no_dyn_broadcast || throw(
         DimensionMismatch("Some axes are not equal, or feature a dynamic broadcast!"),
     )
-    _islinear = broadcast_islinear(bc, semi_static_axes(dst))
+    _islinear = broadcast_islinear(bc, dstax)
     __fast_materialize!(dst, Val(NOALIAS), bc, Val(_islinear))
     return dst
 end
@@ -218,6 +266,7 @@ end
     end
     return y
 end
+
 
 function _fb_macro!(ex::Expr, threadarg, broadcastarg)
     ops = (:(+), :(-), :(*), :(/), :(\), :(÷), :(&), :(|), :(⊻), :(>>), :(>>>), :(<<), :(^))
@@ -385,6 +434,26 @@ macro (..)(kwarg0, kwarg1, ex)
     threadarg, broadcastarg = _process_kwarg(kwarg0)
     threadarg, broadcastarg = _process_kwarg(kwarg1, threadarg, broadcastarg)
     fb_macro!(ex, threadarg, broadcastarg)
+end
+
+
+
+let # we could check `hasfield(Method, :recursion_relation)`, but I'd rather see an error if things change
+    dont_limit = Returns(true)
+    for f in (
+        check_no_dyn_broadcast,
+        broadcast_islinear,
+        semi_static_axes,
+        __view,
+        _view,
+        _rall,
+        _rmap,
+        _fastindex,
+    )
+        for m in methods(f)
+            m.recursion_relation = dont_limit
+        end
+    end
 end
 
 end
