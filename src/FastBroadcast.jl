@@ -100,7 +100,7 @@ end
 @inline _fastindex(b::Tuple{X}, _) where {X} = only(b)
 @inline _fastindex(b::Base.RefValue, _) = b[]
 @inline _fastindex(b::Tuple{X, Y, Vararg}, i) where {X, Y} = @inbounds b[i]
-@inline _fastindex(b::Broadcasted, i) = b.f(_rmap(Fix2(_fastindex, i), b.args)...)
+@inline _fastindex(b::Broadcasted, i) = b.f(_rmap(_fastindex, b.args, ntuple(Returns(i), length(b.args)))...)
 @inline function _fastindex(A, i)
     i isa Int && return @inbounds A[i]
     axs = semi_static_axes(A)
@@ -209,7 +209,20 @@ end
     fast_materialize!(_view(dest, r, VN), _view(bcobj, r, VN))
     return nothing
 end
-@inline function fast_materialize_threaded!(dst,bc::Broadcasted)
+Base.@propagate_inbounds function fast_materialize_threaded(
+        bc::Broadcasted{S}) where {S}
+    if S === Base.Broadcast.DefaultArrayStyle{0}
+        return only(bc)
+    elseif S <: Base.Broadcast.DefaultArrayStyle
+        fast_materialize_threaded!(
+            similar(bc, Base.Broadcast.combine_eltypes(bc.f, bc.args)),
+            bc
+        )
+    else
+        materialize(bc)
+    end
+end
+function fast_materialize_threaded!(dst,bc::Broadcasted)
     dstaxes = axes(dst)
     last_dstaxes = dstaxes[end]
     Polyester.batch(
