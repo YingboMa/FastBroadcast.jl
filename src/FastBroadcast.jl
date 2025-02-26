@@ -20,9 +20,11 @@ export @..
     end
 end
 
-@inline _rall(f, x::Tuple{}) = true
-@inline _rall(f, x::Tuple{X}) where {X} = f(only(x))
-@inline _rall(f, x::Tuple{X, Y, Vararg}) where {X, Y} = f(first(x)) && _rall(f, Base.tail(x))
+@inline _rall(x::Tuple{}) = true
+@inline _rall(x::Tuple{Vararg{Bool}}) = first(x) && _rall(Base.tail(x))
+
+@inline _rany(x::Tuple{}) = false
+@inline _rany(x::Tuple{Vararg{Bool}}) = (first(x)) || _rany(Base.tail(x))
 
 @inline _rmap(f, ::Tuple{}) = ()
 @inline _rmap(f, x::Tuple{X}) where {X} = (@inline(f(only(x))),)
@@ -69,11 +71,11 @@ check_no_dyn_broadcast(::Union{Number, Base.RefValue}, ::Tuple{Vararg{Any, N}}) 
     MN = min(length(ax), length(bx))
     subax = ntuple(Fix1(Base.getindex, ax), Val(MN))
     subbx = ntuple(Fix1(Base.getindex, bx), Val(MN))
-    _rall(identity, _rmap(axismatch, subax, subbx))
+    _rall(_rmap(axismatch, subax, subbx))
 end
 
 @inline function check_no_dyn_broadcast(bc::Broadcasted, ax::Tuple{Vararg{Any, N}}) where {N}
-    _rall(Fix2(check_no_dyn_broadcast, ax), bc.args)
+    _rall(_rmap(check_no_dyn_broadcast, bc.args, ntuple(Returns(ax), Val(length(bc.args)))))
 end
 
 broadcast_islinear(::Union{Number, Base.RefValue}, ::Tuple{Vararg{Any, N}}) where {N} = false
@@ -84,14 +86,14 @@ end
 function broadcast_islinear(B, ax::Tuple{Vararg{Any, N}}) where {N}
     bx = semi_static_axes(B)
     if (IndexStyle(typeof(B)) === IndexLinear()) && length(bx) == N
-        !_rall(!isequal(SingularAxis()), bx)
+        _rany(_rmap(isequal(SingularAxis()), bx))
     else
         true
     end
 end
 
 function broadcast_islinear(bc::Broadcasted, ax::Tuple{Vararg{Any, N}}) where N
-    !_rall(Fix2(!broadcast_islinear, ax), bc.args)
+    _rany(_rmap(broadcast_islinear, bc.args, ntuple(Returns(ax), Val(length(bc.args)))))
 end
 
 @inline _fastindex(b::Number, _) = b
@@ -447,6 +449,7 @@ let # we could check `hasfield(Method, :recursion_relation)`, but I'd rather see
         __view,
         _view,
         _rall,
+        _rany,
         _rmap,
         _fastindex,
     )
