@@ -16,15 +16,11 @@ if GROUP == "All" || GROUP == "Core"
     dst = zeros(Int, 4)
     bc = Broadcast.Broadcasted(+, (Broadcast.Broadcasted(*, (x, y)), x, y, x, y, x, y))
     bcref = copy(bc)
-    @test FastBroadcast.fast_materialize!(
-      FastBroadcast.False(),
-      FastBroadcast.True(),
+    @test FastBroadcast.fast_materialize_threaded!(
       dst,
       bc,
     ) == bcref
     @test FastBroadcast.fast_materialize!(
-      FastBroadcast.False(),
-      FastBroadcast.False(),
       dst,
       bc,
     ) == bcref
@@ -51,7 +47,7 @@ if GROUP == "All" || GROUP == "Core"
     @test (@.. A * y' + x) ≈ (@. A * y' + x)
     @test (@.. A * transpose(y) + x) ≈ (@. A * transpose(y) + x)
     Ashim = A[1:1, :]
-    @test_throws DimensionMismatch (@.. Ashim * y' + x) ≈ (@. Ashim * y' + x) # test fallback
+    @test_throws DimensionMismatch @.. Ashim * y' + x # test fallback
     @test (@.. broadcast = true Ashim * y' + x) ≈ (@. Ashim * y' + x) # test fallback
     Av = view(A, 1, :)
     @test (@.. Av * y' + A) ≈ (@. Av * y' + A)
